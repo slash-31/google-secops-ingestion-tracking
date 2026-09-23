@@ -43,14 +43,14 @@ def get_client() -> SecOpsMonitoringClient:
     )
 
 
-def fetch_period_summary(period_key: str):
+def fetch_period_summary(period_key: str, force_reload: bool = False):
     """Fetches and calculates summary for 'daily', 'weekly', 'monthly', or 'yearly' (12 months)."""
     cache_key = f"{app.config['SECOPS_PROJECT_ID']}_{period_key}_{app.config.get('MOCK_MODE', False)}"
     cached = _cache.get(cache_key)
     now = datetime.now(timezone.utc)
 
-    # Cache valid for 3 minutes
-    if cached and (now - cached["timestamp"]).total_seconds() < 180:
+    # Cache valid for 3 minutes unless force_reload is requested
+    if not force_reload and cached and (now - cached["timestamp"]).total_seconds() < 180:
         return cached["summary"]
 
     client = get_client()
@@ -235,10 +235,42 @@ def api_bigquery_compat():
     summary = fetch_period_summary(period)
     bq_rows = IngestionCalculator.to_bigquery_compat_table(summary)
     return jsonify({
-        "table_name": f"chronicle-{app.config['SECOPS_PROJECT_ID']}.datalake.ingestion_metrics",
+        "table_name": "chronicle-[REDACTED_PROJECT_ID].datalake.ingestion_metrics",
         "migrated_from": "BigQuery (May 2025)",
         "replacement_api": "Cloud Monitoring API v3 (projects.timeSeries.list)",
         "rows": bq_rows,
+    })
+
+
+@app.route("/api/collect", methods=["GET", "POST"])
+def api_collect():
+    """Automated data collection endpoint triggered by Cloud Scheduler or cron."""
+    cron_secret = os.environ.get("CRON_SECRET")
+    if cron_secret:
+        auth_header = request.headers.get("Authorization", "")
+        token = request.headers.get("X-Cron-Token", "")
+        if token != cron_secret and auth_header != f"Bearer {cron_secret}":
+            return jsonify({"error": "Unauthorized"}), 401
+
+    results = {}
+    for period_key in ["daily", "weekly", "monthly", "yearly"]:
+        summary = fetch_period_summary(period_key, force_reload=True)
+        results[period_key] = {
+            "period": summary.period_name,
+            "total_bytes": summary.total_bytes,
+            "total_size_mb": summary.total_size_mb,
+            "total_size_gb": summary.total_size_gb,
+            "total_records": summary.total_records,
+            "total_normalized_events": summary.total_normalized_events,
+            "active_sources": summary.active_log_types_count,
+            "overall_norm_ratio_pct": summary.overall_norm_ratio,
+        }
+
+    return jsonify({
+        "status": "success",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "project_id": "[REDACTED_PROJECT_ID]",
+        "collected_periods": results,
     })
 
 

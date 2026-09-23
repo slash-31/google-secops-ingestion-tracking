@@ -9,6 +9,11 @@ if [ "$SSL_ENABLED" = "true" ] || [ "$SSL_ENABLED" = "1" ] || [ "$PORT" = "443" 
     IS_SSL="true"
 fi
 
+# Cloud Run injects K_SERVICE and handles TLS termination at the edge; container serves HTTP
+if [ -n "$K_SERVICE" ] || [ "$CLOUD_RUN" = "true" ]; then
+    IS_SSL="false"
+fi
+
 if [ "$IS_SSL" = "true" ]; then
     CERT_FILE="${SSL_CERT_PATH:-/app/certs/cert.pem}"
     KEY_FILE="${SSL_KEY_PATH:-/app/certs/key.pem}"

@@ -113,6 +113,41 @@ class TestAppEndpoints(unittest.TestCase):
         self.assertIn("reconciliation", data)
         self.assertIn("total_official_max_bytes", data)
 
+    def test_api_bigquery_compat_redaction(self):
+        res = self.app.get("/api/ingestion/bigquery-compat?period=daily")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["table_name"], "chronicle-[REDACTED_PROJECT_ID].datalake.ingestion_metrics")
+
+    def test_api_collect_success(self):
+        res = self.app.post("/api/collect")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["status"], "success")
+        self.assertIn("collected_periods", data)
+        self.assertIn("daily", data["collected_periods"])
+        self.assertEqual(data["project_id"], "[REDACTED_PROJECT_ID]")
+
+    def test_api_collect_auth(self):
+        import os
+        os.environ["CRON_SECRET"] = "supersecret123"
+        try:
+            # Unauthorized without header
+            res_unauth = self.app.post("/api/collect")
+            self.assertEqual(res_unauth.status_code, 401)
+
+            # Authorized with X-Cron-Token header
+            res_auth = self.app.post("/api/collect", headers={"X-Cron-Token": "supersecret123"})
+            self.assertEqual(res_auth.status_code, 200)
+            self.assertEqual(res_auth.get_json()["status"], "success")
+
+            # Authorized with Bearer token
+            res_bearer = self.app.post("/api/collect", headers={"Authorization": "Bearer supersecret123"})
+            self.assertEqual(res_bearer.status_code, 200)
+            self.assertEqual(res_bearer.get_json()["status"], "success")
+        finally:
+            os.environ.pop("CRON_SECRET", None)
+
 
 if __name__ == "__main__":
     unittest.main()

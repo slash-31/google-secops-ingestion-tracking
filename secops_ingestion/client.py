@@ -94,7 +94,7 @@ class SecOpsMonitoringClient:
         candidates = []
         if self.credentials_path:
             candidates.append(os.path.expanduser(self.credentials_path))
-        default_sa_path = os.path.expanduser("~/.creds/weirdsecops-ing.json")
+        default_sa_path = os.path.expanduser("~/.creds/secops-sa.json")
         if default_sa_path not in candidates and os.path.exists(default_sa_path):
             candidates.append(default_sa_path)
 

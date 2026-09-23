@@ -71,6 +71,8 @@ function setupEventListeners() {
         loadReconciliationData();
       } else if (tabTarget === 'tabBigQuery') {
         loadBigQueryData();
+      } else if (tabTarget === 'tabInspector') {
+        updateEditorQuery();
       }
     });
   });
@@ -156,6 +158,39 @@ function setupEventListeners() {
 
     loadDashboardData(currentPeriod);
   });
+
+  // API Query Editor controls
+  const metricSelect = document.getElementById('editorMetricSelect');
+  const alignSelect = document.getElementById('editorAlignmentSelect');
+  const logTypeSelect = document.getElementById('editorLogTypeSelect');
+  const btnCopyCurl = document.getElementById('btnCopyEditorCurl');
+
+  if (metricSelect) metricSelect.addEventListener('change', updateEditorQuery);
+  if (alignSelect) alignSelect.addEventListener('change', updateEditorQuery);
+  if (logTypeSelect) logTypeSelect.addEventListener('change', updateEditorQuery);
+
+  if (btnCopyCurl) {
+    btnCopyCurl.addEventListener('click', () => {
+      const metric = metricSelect ? metricSelect.value : 'chronicle.googleapis.com/ingestion/log/bytes_count';
+      const alignment = alignSelect ? alignSelect.value : '1800s';
+      const logType = logTypeSelect ? logTypeSelect.value : '';
+
+      let filter = `metric.type = "${metric}"`;
+      if (logType) {
+        filter += ` AND resource.labels.log_type = "${logType}"`;
+      }
+      const encodedFilter = encodeURIComponent(filter);
+      const encodedGroupBy = encodeURIComponent('resource.labels.log_type,resource.labels.collector_id');
+
+      const curlCmd = `curl -X GET "https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries?filter=${encodedFilter}&aggregation.groupByFields=${encodedGroupBy}&aggregation.perSeriesAligner=ALIGN_SUM&aggregation.crossSeriesReducer=REDUCE_NONE&aggregation.alignmentPeriod=${alignment}&interval.startTime=2026-09-23T00:00:00Z&interval.endTime=2026-09-23T23:59:59Z" -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Accept: application/json"`;
+
+      navigator.clipboard.writeText(curlCmd).then(() => {
+        const orig = btnCopyCurl.textContent;
+        btnCopyCurl.textContent = 'Copied!';
+        setTimeout(() => { btnCopyCurl.textContent = orig; }, 2000);
+      });
+    });
+  }
 }
 
 async function loadDashboardData(period) {
@@ -179,18 +214,22 @@ async function loadDashboardData(period) {
     rawLogSources = breakdown.log_types || [];
     renderSourcesTable(rawLogSources);
     renderHealthCards(rawLogSources);
+    populateEditorLogTypes(rawLogSources);
+    updateEditorQuery();
 
     // 3. Fetch Timeseries for Charts
     const timeseriesRes = await fetch(`/api/ingestion/timeseries?period=${period}`);
     const timeseries = await timeseriesRes.json();
     renderCharts(timeseries.timeline, rawLogSources);
 
-    // If reconcile or bigquery tab is already active, reload them too
+    // If reconcile, bigquery or inspector tab is already active, reload them too
     const activeTab = document.querySelector('.tab-btn.active');
     if (activeTab && activeTab.getAttribute('data-tab') === 'tabReconcile') {
       loadReconciliationData();
     } else if (activeTab && activeTab.getAttribute('data-tab') === 'tabBigQuery') {
       loadBigQueryData();
+    } else if (activeTab && activeTab.getAttribute('data-tab') === 'tabInspector') {
+      updateEditorQuery();
     }
   } catch (err) {
     console.error('Error fetching dashboard data:', err);
@@ -499,5 +538,45 @@ async function loadBigQueryData() {
   } catch (err) {
     console.error('Error fetching BigQuery format:', err);
     tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: #ef4444;">Failed loading BigQuery view: ${err.message}</td></tr>`;
+  }
+}
+
+function populateEditorLogTypes(sources) {
+  const select = document.getElementById('editorLogTypeSelect');
+  if (!select) return;
+  const currentVal = select.value;
+  select.innerHTML = '<option value="">All Log Types (Unfiltered)</option>';
+  const logTypes = [...new Set(sources.map(s => s.log_type))].sort();
+  logTypes.forEach(lt => {
+    const opt = document.createElement('option');
+    opt.value = lt;
+    opt.textContent = lt;
+    if (lt === currentVal) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function updateEditorQuery() {
+  const metric = document.getElementById('editorMetricSelect')?.value || 'chronicle.googleapis.com/ingestion/log/bytes_count';
+  const alignment = document.getElementById('editorAlignmentSelect')?.value || '1800s';
+  const logType = document.getElementById('editorLogTypeSelect')?.value;
+
+  let filter = `metric.type = "${metric}"`;
+  if (logType) {
+    filter += ` AND resource.labels.log_type = "${logType}"`;
+  }
+
+  const encodedFilter = encodeURIComponent(filter);
+  const encodedGroupBy = encodeURIComponent('resource.labels.log_type,resource.labels.collector_id');
+  const aligner = 'ALIGN_SUM';
+  const reducer = 'REDUCE_NONE';
+
+  const rawUrl = `https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries?filter=${encodedFilter}\n  &aggregation.groupByFields=${encodedGroupBy}\n  &aggregation.perSeriesAligner=${aligner}\n  &aggregation.crossSeriesReducer=${reducer}\n  &aggregation.alignmentPeriod=${alignment}\n  &interval.startTime=2026-09-23T00:00:00Z\n  &interval.endTime=2026-09-23T23:59:59Z`;
+
+  const curlCmd = `curl -X GET \\\n  "https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries?filter=${encodedFilter}&aggregation.groupByFields=${encodedGroupBy}&aggregation.perSeriesAligner=${aligner}&aggregation.crossSeriesReducer=${reducer}&aggregation.alignmentPeriod=${alignment}&interval.startTime=2026-09-23T00:00:00Z&interval.endTime=2026-09-23T23:59:59Z" \\\n  -H "Authorization: Bearer $(gcloud auth print-access-token)" \\\n  -H "Accept: application/json"`;
+
+  const outputEl = document.getElementById('editorQueryOutput');
+  if (outputEl) {
+    outputEl.textContent = `GET ${rawUrl}\n\n# Command Line cURL Execution:\n${curlCmd}`;
   }
 }
