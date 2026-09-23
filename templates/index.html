@@ -37,11 +37,20 @@
         <span id="modeText">{{ 'MOCK / DEMO' if mock_mode else 'GCP LIVE' }}</span>
       </div>
 
+      <!-- SSL / HTTPS Pill -->
+      <div class="badge {{ 'badge-ssl' if ssl_enabled else 'badge-ssl badge-ssl-disabled' }}" id="sslBadge" title="Transport Security">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+        </svg>
+        <span id="sslText">{{ 'HTTPS' if ssl_enabled else 'HTTP' }}</span>
+      </div>
+
       <!-- Timeframe Nav Pills -->
       <nav class="timeframe-nav" aria-label="Timeframe selector">
         <button class="timeframe-btn active" data-period="daily">Daily (24h)</button>
         <button class="timeframe-btn" data-period="weekly">Weekly (7d)</button>
         <button class="timeframe-btn" data-period="monthly">Monthly (30d)</button>
+        <button class="timeframe-btn" data-period="yearly">12 Months (1y)</button>
       </nav>
 
       <!-- Action Buttons -->

@@ -18,12 +18,29 @@ class TestAppEndpoints(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn(b"Google SecOps Ingestion Intelligence", res.data)
 
+    def test_index_route_ssl(self):
+        app.config["SSL_ENABLED"] = True
+        res = self.app.get("/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(b"badge-ssl", res.data)
+        self.assertIn(b"HTTPS", res.data)
+        app.config["SSL_ENABLED"] = False
+
     def test_api_status(self):
         res = self.app.get("/api/status")
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertIn("project_id", data)
         self.assertEqual(data["mode"], "mock")
+        self.assertIn("ssl", data)
+
+    def test_api_status_ssl(self):
+        app.config["SSL_ENABLED"] = True
+        res = self.app.get("/api/status")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["ssl"])
+        app.config["SSL_ENABLED"] = False
 
     def test_api_summary_daily(self):
         res = self.app.get("/api/ingestion/summary?period=daily")
@@ -54,7 +71,7 @@ class TestAppEndpoints(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertIn("rows", data)
-        self.assertIn("chronicle-secops-superweird.datalake.ingestion_metrics", data["table_name"])
+        self.assertIn("datalake.ingestion_metrics", data["table_name"])
 
     def test_api_export_csv(self):
         res = self.app.get("/api/export/csv?period=daily")
@@ -66,6 +83,35 @@ class TestAppEndpoints(unittest.TestCase):
         res = self.app.get("/api/export/json?period=daily")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.mimetype, "application/json")
+
+    def test_api_summary_yearly(self):
+        res = self.app.get("/api/ingestion/summary?period=yearly")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("total_bytes", data)
+        self.assertIn("Yearly (Last 12 Months)", data["period"])
+        self.assertTrue(data["total_bytes"] > 0)
+
+    def test_api_summary_12months_alias(self):
+        res = self.app.get("/api/ingestion/summary?period=12months")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("total_bytes", data)
+        self.assertIn("Yearly (Last 12 Months)", data["period"])
+
+    def test_api_timeseries_yearly(self):
+        res = self.app.get("/api/ingestion/timeseries?period=yearly")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("timeline", data)
+        self.assertTrue(len(data["timeline"]) > 0)
+
+    def test_api_reconcile_yearly(self):
+        res = self.app.get("/api/ingestion/reconcile?period=yearly")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("reconciliation", data)
+        self.assertIn("total_official_max_bytes", data)
 
 
 if __name__ == "__main__":

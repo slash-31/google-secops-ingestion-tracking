@@ -4,3 +4,10 @@ __pycache__/
 *.env
 .DS_Store
 .venv/
+certs/
+*.pem
+*.key
+*.crt
+*.csv
+daily_ingestion.*
+daily_report.*

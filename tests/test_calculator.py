@@ -50,7 +50,7 @@ class TestIngestionCalculator(unittest.TestCase):
         self.assertEqual(src.health_status, "HEALTHY")
 
     def test_reconciliation_logic(self):
-        client = SecOpsMonitoringClient(project_id="secops-superweird", mock_mode=True)
+        client = SecOpsMonitoringClient(project_id="test-secops-project", mock_mode=True)
         now = datetime.now(timezone.utc)
         reconcile_data = client.reconcile_30m_vs_rollup(
             start_time=now - timedelta(days=1),
@@ -64,7 +64,7 @@ class TestIngestionCalculator(unittest.TestCase):
             self.assertEqual(row["official_max"], max(row["sum_30m"], row["rollup"]))
 
     def test_bigquery_compat_table(self):
-        client = SecOpsMonitoringClient(project_id="secops-superweird", mock_mode=True)
+        client = SecOpsMonitoringClient(project_id="test-secops-project", mock_mode=True)
         now = datetime.now(timezone.utc)
         raw_metrics = client.fetch_all_metrics(
             start_time=now - timedelta(days=1),
@@ -85,6 +85,28 @@ class TestIngestionCalculator(unittest.TestCase):
             self.assertIn("size_mb", row)
             self.assertIn("event_count", row)
             self.assertIn("normalized_events", row)
+
+    def test_yearly_summary_calculation(self):
+        client = SecOpsMonitoringClient(project_id="test-secops-project", mock_mode=True)
+        now = datetime.now(timezone.utc)
+        start_time = now - timedelta(days=365)
+        raw_metrics = client.fetch_all_metrics(
+            start_time=start_time,
+            end_time=now,
+            alignment_period_seconds=86400,
+        )
+        summary = IngestionCalculator.calculate_summary(
+            metrics_dict=raw_metrics,
+            period_name="Yearly (Last 12 Months)",
+            start_time=start_time,
+            end_time=now,
+        )
+        self.assertEqual(summary.period_name, "Yearly (Last 12 Months)")
+        self.assertTrue(summary.total_bytes > 0)
+        self.assertTrue(summary.total_records > 0)
+        self.assertTrue(summary.total_normalized_events > 0)
+        self.assertTrue(len(summary.log_types) > 0)
+        self.assertTrue(len(summary.timeline_series) > 0)
 
 
 if __name__ == "__main__":

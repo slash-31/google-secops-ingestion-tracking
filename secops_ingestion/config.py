@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict
 
 # GCP Project and Instance Defaults
-DEFAULT_PROJECT_ID = "secops-superweird"
-DEFAULT_INSTANCE_ID = "15c91f7d-bce0-4ba4-b253-647e6753f0dd"
+DEFAULT_PROJECT_ID = "your-secops-project-id"
+DEFAULT_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
 DEFAULT_REGION = "us"
 
 # Cloud Monitoring API Base URL
@@ -58,3 +58,12 @@ DEFAULT_KNOWN_LOG_TYPES = [
     {"log_type": "VMWARE_ESX", "collectors": ["syslog-receiver"], "ratio": 0.945, "avg_bytes": 390},
     {"log_type": "CLOUDFLARE_DNS", "collectors": ["gcs-logpush-feed"], "ratio": 0.990, "avg_bytes": 310},
 ]
+
+# Standard Period Definitions: (days, alignment_seconds, display_name)
+PERIOD_CONFIGS = {
+    "daily": (1, ROLLUP_30M_SECONDS, "Daily (Last 24 Hours)"),
+    "weekly": (7, 7200, "Weekly (Last 7 Days)"),
+    "monthly": (30, 21600, "Monthly (Last 30 Days)"),
+    "yearly": (365, 86400, "Yearly (Last 12 Months)"),
+    "12months": (365, 86400, "Yearly (Last 12 Months)"),
+}

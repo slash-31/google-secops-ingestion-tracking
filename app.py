@@ -17,6 +17,7 @@ from secops_ingestion.config import (
     METRIC_BYTES_COUNT,
     METRIC_RECORD_COUNT,
     METRIC_NORMALIZER_EVENT_COUNT,
+    PERIOD_CONFIGS,
 )
 from secops_ingestion.client import SecOpsMonitoringClient
 from secops_ingestion.calculator import IngestionCalculator
@@ -25,6 +26,9 @@ app = Flask(__name__)
 app.config["SECOPS_PROJECT_ID"] = os.environ.get("SECOPS_PROJECT_ID", DEFAULT_PROJECT_ID)
 app.config["MOCK_MODE"] = os.environ.get("MOCK_MODE", "false").lower() in ("true", "1", "yes")
 app.config["CREDENTIALS_PATH"] = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+app.config["SSL_ENABLED"] = os.environ.get("SSL_ENABLED", "false").lower() in ("true", "1", "yes")
+app.config["SSL_CERT_PATH"] = os.environ.get("SSL_CERT_PATH", "certs/cert.pem")
+app.config["SSL_KEY_PATH"] = os.environ.get("SSL_KEY_PATH", "certs/key.pem")
 
 # In-memory cache for fast UI interaction
 _cache: Dict[str, Any] = {}
@@ -40,7 +44,7 @@ def get_client() -> SecOpsMonitoringClient:
 
 
 def fetch_period_summary(period_key: str):
-    """Fetches and calculates summary for 'daily', 'weekly', or 'monthly'."""
+    """Fetches and calculates summary for 'daily', 'weekly', 'monthly', or 'yearly' (12 months)."""
     cache_key = f"{app.config['SECOPS_PROJECT_ID']}_{period_key}_{app.config.get('MOCK_MODE', False)}"
     cached = _cache.get(cache_key)
     now = datetime.now(timezone.utc)
@@ -50,12 +54,10 @@ def fetch_period_summary(period_key: str):
         return cached["summary"]
 
     client = get_client()
-    days_map = {
-        "daily": (1, ROLLUP_30M_SECONDS, "Daily (Last 24 Hours)"),
-        "weekly": (7, 7200, "Weekly (Last 7 Days)"),
-        "monthly": (30, 21600, "Monthly (Last 30 Days)"),
-    }
-    days, alignment, title = days_map.get(period_key, (1, ROLLUP_30M_SECONDS, "Daily (Last 24 Hours)"))
+    days, alignment, title = PERIOD_CONFIGS.get(
+        period_key,
+        (1, ROLLUP_30M_SECONDS, "Daily (Last 24 Hours)")
+    )
 
     start_time = now - timedelta(days=days)
     end_time = now
@@ -84,11 +86,13 @@ def index():
     """Main dashboard page."""
     client = get_client()
     auth_info = client.get_auth_status()
+    ssl_active = bool(request.is_secure or app.config.get("SSL_ENABLED", False))
     return render_template(
         "index.html",
         project_id=app.config["SECOPS_PROJECT_ID"],
         mock_mode=app.config.get("MOCK_MODE", False),
         auth_info=auth_info,
+        ssl_enabled=ssl_active,
     )
 
 
@@ -98,6 +102,14 @@ def api_status():
     client = get_client()
     status = client.get_auth_status()
     status["cached_entries"] = len(_cache)
+    status["ssl"] = bool(request.is_secure or app.config.get("SSL_ENABLED", False))
+    cert_path = app.config.get("SSL_CERT_PATH")
+    if cert_path and os.path.exists(cert_path):
+        try:
+            from secops_ingestion.ssl_util import get_certificate_info
+            status["ssl_certificate"] = get_certificate_info(cert_path)
+        except Exception:
+            pass
     return jsonify(status)
 
 
@@ -198,7 +210,7 @@ def api_reconcile():
     """Runs customer 30-minute sum vs rollup window reconciliation check."""
     client = get_client()
     period = request.args.get("period", "daily").lower()
-    days = 1 if period == "daily" else (7 if period == "weekly" else 30)
+    days = PERIOD_CONFIGS.get(period, (1, ROLLUP_30M_SECONDS, "Daily"))[0]
     now = datetime.now(timezone.utc)
     start_time = now - timedelta(days=days)
 
@@ -314,4 +326,23 @@ def api_export_json():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    ssl_enabled = os.environ.get("SSL_ENABLED", "false").lower() in ("true", "1", "yes")
+    cert_path = os.environ.get("SSL_CERT_PATH", "certs/cert.pem")
+    key_path = os.environ.get("SSL_KEY_PATH", "certs/key.pem")
+
+    ssl_context = None
+    protocol = "http"
+    if ssl_enabled or (os.path.exists(cert_path) and os.path.exists(key_path) and os.environ.get("SSL_ENABLED") != "0"):
+        from secops_ingestion.ssl_util import ensure_ssl_credentials, create_ssl_context
+        c_path, k_path = ensure_ssl_credentials(cert_path, key_path)
+        ssl_context = create_ssl_context(c_path, k_path)
+        protocol = "https"
+        app.config["SSL_ENABLED"] = True
+        app.config["SSL_CERT_PATH"] = c_path
+        app.config["SSL_KEY_PATH"] = k_path
+        print(f"🔒 SSL/TLS Enabled (Cert: {c_path}, Key: {k_path})")
+
+    print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://localhost:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False, ssl_context=ssl_context)
+

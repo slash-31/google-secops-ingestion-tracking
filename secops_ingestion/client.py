@@ -16,6 +16,7 @@ from google.oauth2 import service_account
 
 from .config import (
     DEFAULT_PROJECT_ID,
+    DEFAULT_INSTANCE_ID,
     MONITORING_API_BASE,
     METRIC_BYTES_COUNT,
     METRIC_RECORD_COUNT,
@@ -432,7 +433,7 @@ class SecOpsMonitoringClient:
                         "labels": {
                             "project_id": self.project_id,
                             "location": "us",
-                            "instance_id": "15c91f7d-bce0-4ba4-b253-647e6753f0dd",
+                            "instance_id": DEFAULT_INSTANCE_ID,
                             "log_type": log_type,
                             "collector_id": collector_id,
                         },

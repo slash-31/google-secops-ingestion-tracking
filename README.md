@@ -14,6 +14,7 @@ A production-ready CLI script and interactive web dashboard to pull, calculate, 
    - **Daily** (Last 24 hours / 30m buckets)
    - **Weekly** (Last 7 days / 2h buckets)
    - **Monthly** (Last 30 days / 6h buckets)
+   - **Yearly / 12 Months** (Last 365 days / 24h buckets)
 3. **Customer Rollup Reconciliation Algorithm**:
    - Evaluates the sum of all 30-minute intervals (`*/30m` dataset) vs the whole-window rollup point.
    - Enforces `max(sum_30m, rollup)` as the official authoritative record for tracking, alerting, and capacity planning.
@@ -39,26 +40,37 @@ A production-ready CLI script and interactive web dashboard to pull, calculate, 
 
 ## 🚀 Quick Start
 
+### 0. Prerequisites & Installation
+
+```bash
+pip install -r requirements.txt
+```
+
 ### 1. Run the CLI Tool
 
 #### Daily Ingestion Report with 30m Rollup Reconciliation:
 ```bash
-./secops_ingestion_cli.py --project secops-superweird --timeframe daily --reconcile-30m
+./secops_ingestion_cli.py --project your-gcp-project-id --timeframe daily --reconcile-30m
 ```
 
-#### Weekly & Monthly Ingestion Reports:
+#### Weekly, Monthly & Last 12 Months Ingestion Reports:
 ```bash
-# Weekly (Last 7 Days)
-./secops_ingestion_cli.py --project secops-superweird --timeframe weekly
+# Last 12 Months (365 Days)
+./secops_ingestion_cli.py --project your-gcp-project-id --timeframe yearly
+# Or alias
+./secops_ingestion_cli.py --project your-gcp-project-id --timeframe 12months
 
-# All Timeframes (Daily, Weekly, Monthly)
-./secops_ingestion_cli.py --project secops-superweird --timeframe all
+# Weekly (Last 7 Days)
+./secops_ingestion_cli.py --project your-gcp-project-id --timeframe weekly
+
+# All Timeframes (Daily, Weekly, Monthly, and 12-Month Yearly)
+./secops_ingestion_cli.py --project your-gcp-project-id --timeframe all
 ```
 
 #### Export to CSV, JSON, or Markdown:
 ```bash
 ./secops_ingestion_cli.py \
-  --project secops-superweird \
+  --project your-gcp-project-id \
   --timeframe daily \
   --export-csv daily_ingestion.csv \
   --export-json daily_ingestion.json \
@@ -74,17 +86,30 @@ A production-ready CLI script and interactive web dashboard to pull, calculate, 
 
 ### 2. Launch the Web Dashboard Site
 
-You can start the web dashboard directly using either command:
+You can start the web dashboard directly in HTTP or HTTPS mode:
 
+#### Secure HTTPS (Self-Signed SSL Certificate):
 ```bash
-# Via CLI flag
-./secops_ingestion_cli.py --serve --port 5000
+# Launch with automated self-signed SSL certificate (defaults to port 8443 or custom port)
+./secops_ingestion_cli.py --serve --ssl --port 8443
+
+# Or explicitly generate/regenerate certificates first
+./secops_ingestion_cli.py --generate-cert
+
+# Run directly via Python with SSL
+SSL_ENABLED=true PORT=8443 python3 app.py
+```
+Then open your browser to: **`https://localhost:8443`**
+
+#### Standard HTTP:
+```bash
+# Via CLI flag (choose port 8080 on macOS to avoid AirPlay Receiver conflict on 5000)
+./secops_ingestion_cli.py --serve --port 8080
 
 # Or directly with Python
-python3 app.py
+PORT=8080 python3 app.py
 ```
-
-Then open your browser to: **`http://localhost:5000`**
+Then open your browser to: **`http://localhost:8080`**
 
 ---
 
@@ -138,13 +163,13 @@ The Flask application exposes a complete REST API:
 | Endpoint | Method | Description |
 | :--- | :---: | :--- |
 | `/api/status` | GET | Connection mode (Live/Mock), GCP project ID, and auth diagnostics |
-| `/api/ingestion/summary?period=daily\|weekly\|monthly` | GET | Ingestion totals (Bytes, Records, Normalized UDM, Health counts) |
-| `/api/ingestion/breakdown?period=daily\|weekly\|monthly` | GET | Detailed breakdown by Log Type and Collector IDs |
-| `/api/ingestion/timeseries?period=daily\|weekly\|monthly` | GET | Time-series data points for volume and records trends |
-| `/api/ingestion/reconcile?period=daily\|weekly\|monthly` | GET | Customer 30m sum vs rollup comparison with official max record |
-| `/api/ingestion/bigquery-compat?period=daily\|weekly\|monthly` | GET | Formatted in the legacy BigQuery table schema |
-| `/api/export/csv?period=daily\|weekly\|monthly` | GET | Download summary CSV |
-| `/api/export/json?period=daily\|weekly\|monthly` | GET | Download summary JSON |
+| `/api/ingestion/summary?period=daily\|weekly\|monthly\|yearly` | GET | Ingestion totals (Bytes, Records, Normalized UDM, Health counts) |
+| `/api/ingestion/breakdown?period=daily\|weekly\|monthly\|yearly` | GET | Detailed breakdown by Log Type and Collector IDs |
+| `/api/ingestion/timeseries?period=daily\|weekly\|monthly\|yearly` | GET | Time-series data points for volume and records trends |
+| `/api/ingestion/reconcile?period=daily\|weekly\|monthly\|yearly` | GET | Customer 30m sum vs rollup comparison with official max record |
+| `/api/ingestion/bigquery-compat?period=daily\|weekly\|monthly\|yearly` | GET | Formatted in the legacy BigQuery table schema |
+| `/api/export/csv?period=daily\|weekly\|monthly\|yearly` | GET | Download summary CSV |
+| `/api/export/json?period=daily\|weekly\|monthly\|yearly` | GET | Download summary JSON |
 | `/api/settings` | POST | Dynamically update Project ID, Credentials file, or Mock mode |
 | `/api/refresh` | POST | Invalidate metric cache and trigger live query |
 

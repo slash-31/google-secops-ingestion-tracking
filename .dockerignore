@@ -1,0 +1,15 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+*.csv
+*.json
+*.md
+!README.md
+certs
+*.pem
+tests
+MagicMock

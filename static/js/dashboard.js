@@ -28,8 +28,23 @@ function formatNumber(num) {
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
+  syncSslBadge();
   loadDashboardData(currentPeriod);
 });
+
+function syncSslBadge() {
+  const sslBadge = document.getElementById('sslBadge');
+  const sslText = document.getElementById('sslText');
+  if (sslBadge && sslText) {
+    if (window.location.protocol === 'https:') {
+      sslBadge.className = 'badge badge-ssl';
+      sslText.textContent = 'HTTPS';
+    } else {
+      sslBadge.className = 'badge badge-ssl badge-ssl-disabled';
+      sslText.textContent = 'HTTP';
+    }
+  }
+}
 
 function setupEventListeners() {
   // Timeframe selector pills
@@ -148,6 +163,7 @@ async function loadDashboardData(period) {
     daily: 'Daily Ingestion Summary (Last 24 Hours)',
     weekly: 'Weekly Ingestion Summary (Last 7 Days)',
     monthly: 'Monthly Ingestion Summary (Last 30 Days)',
+    yearly: '12 Months Ingestion Summary (Last 365 Days)',
   };
   document.getElementById('viewTitle').textContent = titles[period] || 'SecOps Ingestion Summary';
 
@@ -221,6 +237,9 @@ function renderCharts(timeline, logTypes) {
 
   const labels = (timeline || []).map(pt => {
     const d = new Date(pt.timestamp);
+    if (timeline.length > 60) {
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + (timeline.length > 24 ? ' ' + (d.getMonth()+1)+'/'+d.getDate() : '');
   });
   const dataMb = (timeline || []).map(pt => pt.size_mb);

@@ -32,9 +32,9 @@ def parse_args():
     parser.add_argument(
         "--timeframe",
         "-t",
-        choices=["daily", "weekly", "monthly", "all"],
+        choices=["daily", "weekly", "monthly", "yearly", "12months", "all"],
         default="all",
-        help="Timeframe to calculate: daily (last 24h), weekly (last 7d), monthly (last 30d), or all (default)",
+        help="Timeframe to calculate: daily (last 24h), weekly (last 7d), monthly (last 30d), yearly/12months (last 12 months), or all (default)",
     )
     parser.add_argument(
         "--credentials",
@@ -77,6 +77,26 @@ def parse_args():
         default=5000,
         help="Port for the web dashboard server (default: 5000)",
     )
+    parser.add_argument(
+        "--ssl",
+        action="store_true",
+        help="Enable SSL/HTTPS using a self-signed certificate (auto-generated if missing)",
+    )
+    parser.add_argument(
+        "--ssl-cert",
+        default="certs/cert.pem",
+        help="Path to SSL certificate file (default: certs/cert.pem)",
+    )
+    parser.add_argument(
+        "--ssl-key",
+        default="certs/key.pem",
+        help="Path to SSL private key file (default: certs/key.pem)",
+    )
+    parser.add_argument(
+        "--generate-cert",
+        action="store_true",
+        help="Generate or regenerate a self-signed SSL certificate in certs/ and exit",
+    )
     return parser.parse_args()
 
 
@@ -85,8 +105,15 @@ def calculate_period(client: SecOpsMonitoringClient, period_name: str, days: int
     start_time = now - timedelta(days=days)
     end_time = now
 
-    # Use alignment: 30m for daily, 2h for weekly, 6h for monthly
-    alignment_seconds = ROLLUP_30M_SECONDS if days <= 1 else (7200 if days <= 7 else 21600)
+    # Use alignment: 30m for daily, 2h for weekly, 6h for monthly, 1d (86400s) for yearly/12 months
+    if days <= 1:
+        alignment_seconds = ROLLUP_30M_SECONDS
+    elif days <= 7:
+        alignment_seconds = 7200
+    elif days <= 30:
+        alignment_seconds = 21600
+    else:
+        alignment_seconds = 86400
 
     print(f"\n[+] Fetching {period_name.upper()} metrics for project '{client.project_id}'...")
     raw_metrics = client.fetch_all_metrics(
@@ -106,13 +133,63 @@ def calculate_period(client: SecOpsMonitoringClient, period_name: str, days: int
 def main():
     args = parse_args()
 
+    # Certificate generation requested
+    if args.generate_cert:
+        from secops_ingestion.ssl_util import generate_self_signed_cert, get_certificate_info
+        cert_p, key_p = generate_self_signed_cert(
+            cert_path=args.ssl_cert,
+            key_path=args.ssl_key,
+            overwrite=True,
+        )
+        info = get_certificate_info(cert_p)
+        print("=" * 80)
+        print(" GOOGLE SECOPS INGESTION - SSL CERTIFICATE GENERATOR")
+        print("=" * 80)
+        print(f" Certificate:    {cert_p}")
+        print(f" Private Key:    {key_p}")
+        print(f" Common Name:    {info['subject_cn']}")
+        print(f" Issuer:         {info['issuer']}")
+        print(f" Valid Until:    {info['valid_until']} ({info['days_remaining']} days remaining)")
+        print(f" SANs:           {', '.join(info['sans'])}")
+        print(f" SHA-256 Finger: {info['fingerprint_sha256'][:32]}...")
+        print("=" * 80)
+        print("✅ Self-signed SSL certificate is ready for HTTPS.\n")
+        if not args.serve:
+            return
+
     # If --serve is requested, launch the web application
     if args.serve:
-        from app import app
-        print(f"\n🚀 Launching SecOps Ingestion Dashboard on http://localhost:{args.port} (Project: {args.project})")
+        try:
+            from app import app
+        except ImportError as exc:
+            print(
+                f"\n[ERROR] Flask or its dependencies are not installed ({exc}).\n"
+                "To run the web dashboard, install project dependencies:\n"
+                "    pip install -r requirements.txt\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        ssl_context = None
+        protocol = "http"
+        if args.ssl:
+            from secops_ingestion.ssl_util import ensure_ssl_credentials, create_ssl_context
+            cert_p, key_p = ensure_ssl_credentials(
+                cert_path=args.ssl_cert,
+                key_path=args.ssl_key,
+            )
+            ssl_context = create_ssl_context(cert_p, key_p)
+            protocol = "https"
+            app.config["SSL_ENABLED"] = True
+            app.config["SSL_CERT_PATH"] = cert_p
+            app.config["SSL_KEY_PATH"] = key_p
+
+        print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://localhost:{args.port} (Project: {args.project})")
+        if args.ssl:
+            print(f"🔒 SSL/TLS Enabled (Cert: {cert_p}, Key: {key_p})")
         app.config["SECOPS_PROJECT_ID"] = args.project
         app.config["MOCK_MODE"] = args.mock
-        app.run(host="0.0.0.0", port=args.port, debug=False)
+        app.run(host="0.0.0.0", port=args.port, debug=False, ssl_context=ssl_context)
         return
 
     client = SecOpsMonitoringClient(
@@ -137,6 +214,8 @@ def main():
         periods_to_run.append(("Weekly (Last 7 Days)", 7))
     if args.timeframe in ("monthly", "all"):
         periods_to_run.append(("Monthly (Last 30 Days)", 30))
+    if args.timeframe in ("yearly", "12months", "all"):
+        periods_to_run.append(("Yearly (Last 12 Months)", 365))
 
     for name, days in periods_to_run:
         summary = calculate_period(client, name, days)

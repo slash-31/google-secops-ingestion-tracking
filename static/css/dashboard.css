@@ -148,6 +148,18 @@ body {
   color: #fbbf24;
 }
 
+.badge-ssl {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  color: #60a5fa;
+}
+
+.badge-ssl.badge-ssl-disabled {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: var(--text-muted);
+}
+
 .pulse-dot {
   width: 7px;
   height: 7px;
