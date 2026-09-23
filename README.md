@@ -1,124 +1,103 @@
-# Google SecOps Ingestion Intelligence (Script & Site)
+# Google SecOps Ingestion Intelligence (Script & Dashboard)
 
-A production-ready CLI script and interactive web dashboard to pull, calculate, reconcile, and visualize daily, weekly, and monthly ingestion telemetry from **Google SecOps** via the **Google Cloud Monitoring API** (`v3 projects.timeSeries.list`).
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
+
+A production-ready CLI script and interactive web dashboard to pull, calculate, reconcile, and visualize daily, weekly, monthly, and yearly ingestion telemetry from **Google SecOps (formerly Chronicle)** via the **Google Cloud Monitoring API** (`v3 projects.timeSeries.list`).
+
+---
+
+## 📑 Table of Contents
+
+- [Overview & Why This Exists](#-overview--why-this-exists)
+- [Key Capabilities](#-key-capabilities)
+- [Architecture & Metric Extraction](#-architecture--metric-extraction)
+- [Prerequisites & Dependencies (Zero Assumptions Guide)](#-prerequisites--dependencies-zero-assumptions-guide)
+- [IAM & Service Account Setup (Least Privilege)](#-iam--service-account-setup-least-privilege)
+  - [Step 1: Enable Cloud Monitoring API](#step-1-enable-cloud-monitoring-api)
+  - [Step 2: Create a Dedicated Service Account](#step-2-create-a-dedicated-service-account)
+  - [Step 3: Grant Least-Privilege IAM Roles](#step-3-grant-least-privilege-iam-roles)
+  - [Step 4: Provision Credentials](#step-4-provision-credentials)
+- [Environment Variables & Configuration](#-environment-variables--configuration)
+- [Installation & Quick Start](#-installation--quick-start)
+  - [Method 1: Local Python (Native)](#method-1-local-python-native)
+  - [Method 2: Docker Container](#method-2-docker-container)
+  - [Method 3: Docker Compose](#method-3-docker-compose)
+  - [Method 4: CLI Reporting & Exports](#method-4-cli-reporting--exports)
+- [Automated Telemetry Collection & Scheduling](#-automated-telemetry-collection--scheduling)
+- [REST API Reference](#-rest-api-reference)
+- [Testing & Quality Assurance](#-testing--quality-assurance)
+- [Security & Redaction](#-security--redaction)
+
+---
+
+## 💡 Overview & Why This Exists
+
+In May 2025, Google migrated historical SecOps ingestion telemetry away from legacy BigQuery exports (`datalake.ingestion_metrics`) to native **Google Cloud Monitoring API** time-series streams. 
+
+Security teams and detection engineers need visibility into:
+1. **Raw Volume**: How many gigabytes/terabytes of logs are received each day/month.
+2. **Parser Health**: How many raw records successfully normalize into Google SecOps Unified Data Model (UDM) events vs. fail due to parser syntax errors.
+3. **Rollup Reconciliation**: Reconciling fine-grained 30-minute metric buckets against whole-window rollup summaries to eliminate ingestion measurement discrepancies.
+
+This project delivers a **complete, standalone monitoring suite**—including a CLI reporting tool, automated collector, and dark-themed web dashboard—with **zero mandatory infrastructure lock-in**.
 
 ---
 
 ## 🌟 Key Capabilities
 
-1. **Native Cloud Monitoring v3 Metric Extraction**:
-   - `chronicle.googleapis.com/ingestion/log/bytes_count` (Raw Ingestion Volume - Bytes, MB, GB, TB)
-   - `chronicle.googleapis.com/ingestion/log/record_count` (Raw Ingested Records / Log Lines)
-   - `chronicle.googleapis.com/normalizer/event/record_count` (Normalized UDM Events Produced)
-2. **Flexible Timeframe Aggregations**:
-   - **Daily** (Last 24 hours / 30m buckets)
-   - **Weekly** (Last 7 days / 2h buckets)
-   - **Monthly** (Last 30 days / 6h buckets)
-   - **Yearly / 12 Months** (Last 365 days / 24h buckets)
-3. **Customer Rollup Reconciliation Algorithm**:
-   - Evaluates the sum of all 30-minute intervals (`*/30m` dataset) vs the whole-window rollup point.
-   - Enforces `max(sum_30m, rollup)` as the official authoritative record for tracking, alerting, and capacity planning.
-4. **Historical BigQuery Datalake Compatibility**:
-   - Replicates the schema of the deprecated `chronicle-{project}.datalake.ingestion_metrics` table (migrated May 2025):
-     - `log_type`
-     - `collector_ids` (delimited with `:RQ:`)
-     - `size_mb` / `size_gb`
-     - `event_count` / `normalized_events` / `error_events`
-     - `drop_reason_codes`
-5. **Interactive Web Dashboard & REST API**:
-   - Modern Google Cloud / SecOps dark-themed UI.
-   - Live KPI cards, Chart.js time-series trend lines, and volume-share donut charts.
-   - Searchable, filterable log sources breakdown table.
-   - Dynamic reconciliation audit table and BigQuery schema side-by-side view.
-   - Health and parser alert center.
-   - 100% offline-compatible (bundled local JS/CSS).
-6. **Dual Mode Engine (GCP Live + Synthetic Demo Mode)**:
-   - Queries Google Cloud Monitoring API using Application Default Credentials (ADC) or Service Account JSON key.
-   - Gracefully falls back to high-fidelity synthetic demo telemetry (modeled after real-world SecOps log sources like Palo Alto, Windows Sysmon, Linux Sysmon, Meraki, GCP VPC Flow, Auditd, ESXi) if offline or running in test environments.
+- **Native Cloud Monitoring v3 Extraction**: Directly queries the `timeSeries.list` endpoint for:
+  - `chronicle.googleapis.com/ingestion/log/bytes_count` (Raw Ingestion Volume - Bytes, MB, GB, TB)
+  - `chronicle.googleapis.com/ingestion/log/record_count` (Raw Ingested Records / Log Lines)
+  - `chronicle.googleapis.com/normalizer/event/record_count` (Normalized UDM Events Produced)
+- **Flexible Timeframe Aggregations**:
+  - **Daily**: Last 24 hours (30-minute alignment)
+  - **Weekly**: Last 7 days (2-hour alignment)
+  - **Monthly**: Last 30 days (6-hour alignment)
+  - **Yearly / 12 Months**: Last 365 days (24-hour alignment)
+- **Authoritative 30m Reconciliation**: Computes `max(sum_30m, rollup)` per log source to guarantee 100% accurate billing and ingestion tracking.
+- **Legacy BigQuery Compatibility**: Recreates the schema of the retired `datalake.ingestion_metrics` table on the fly for backwards compatibility with existing pipelines.
+- **Interactive Dark-Themed Web Dashboard**: Real-time KPI summary cards, volume share donut charts, time-series graphs, and searchable log-type tables.
+- **Offline / Mock Mode Engine**: Includes high-fidelity synthetic demo telemetry (simulating Palo Alto, Windows Sysmon, Linux Auditd, Meraki, GCP VPC Flow, AWS CloudTrail) allowing immediate testing without an active GCP project.
 
 ---
 
-## 🚀 Quick Start
+## 📐 Architecture & Metric Extraction
 
-### 0. Prerequisites & Installation
-
-```bash
-pip install -r requirements.txt
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Google SecOps                          │
+│         (Forwarders, Ingestion API, Cloud Feeds)            │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Streams telemetry
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│            Google Cloud Monitoring (Metrics API v3)         │
+│  - chronicle.googleapis.com/ingestion/log/bytes_count       │
+│  - chronicle.googleapis.com/ingestion/log/record_count      │
+│  - chronicle.googleapis.com/normalizer/event/record_count   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Authenticated API Query (OAuth2 / JWT)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│        SecOps Ingestion Intelligence Suite (This App)       │
+│                                                             │
+│   ┌─────────────────────┐       ┌───────────────────────┐   │
+│   │ CLI Tool (CLI/Cron) │       │ Flask REST App (UI)   │   │
+│   └──────────┬──────────┘       └───────────┬───────────┘   │
+│              │                              │               │
+│              ▼                              ▼               │
+│   ┌─────────────────────────────────────────────────────┐   │
+│   │            Reconciliation Engine                    │   │
+│   │   val = max(sum_30m_buckets, window_rollup)         │   │
+│   └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 1. Run the CLI Tool
-
-#### Daily Ingestion Report with 30m Rollup Reconciliation:
-```bash
-./secops_ingestion_cli.py --project your-gcp-project-id --timeframe daily --reconcile-30m
-```
-
-#### Weekly, Monthly & Last 12 Months Ingestion Reports:
-```bash
-# Last 12 Months (365 Days)
-./secops_ingestion_cli.py --project your-gcp-project-id --timeframe yearly
-# Or alias
-./secops_ingestion_cli.py --project your-gcp-project-id --timeframe 12months
-
-# Weekly (Last 7 Days)
-./secops_ingestion_cli.py --project your-gcp-project-id --timeframe weekly
-
-# All Timeframes (Daily, Weekly, Monthly, and 12-Month Yearly)
-./secops_ingestion_cli.py --project your-gcp-project-id --timeframe all
-```
-
-#### Export to CSV, JSON, or Markdown:
-```bash
-./secops_ingestion_cli.py \
-  --project your-gcp-project-id \
-  --timeframe daily \
-  --export-csv daily_ingestion.csv \
-  --export-json daily_ingestion.json \
-  --export-md daily_report.md
-```
-
-#### Testing / Demo Mode (No GCP credentials required):
-```bash
-./secops_ingestion_cli.py --mock --timeframe daily --reconcile-30m
-```
-
----
-
-### 2. Launch the Web Dashboard Site
-
-You can start the web dashboard directly in HTTP or HTTPS mode:
-
-#### Secure HTTPS (Self-Signed SSL Certificate):
-```bash
-# Launch with automated self-signed SSL certificate (defaults to port 8443 or custom port)
-./secops_ingestion_cli.py --serve --ssl --port 8443
-
-# Or explicitly generate/regenerate certificates first
-./secops_ingestion_cli.py --generate-cert
-
-# Run directly via Python with SSL
-SSL_ENABLED=true PORT=8443 python3 app.py
-```
-Then open your browser to: **`https://localhost:8443`**
-
-#### Standard HTTP:
-```bash
-# Via CLI flag (choose port 8080 on macOS to avoid AirPlay Receiver conflict on 5000)
-./secops_ingestion_cli.py --serve --port 8080
-
-# Or directly with Python
-PORT=8080 python3 app.py
-```
-Then open your browser to: **`http://localhost:8080`**
-
----
-
-## 🛠️ Customer Query Pattern & Architecture
-
-The Cloud Monitoring API query executed for each metric is:
-
+The application queries the Cloud Monitoring API using the following pattern:
 ```http
-GET https://monitoring.googleapis.com/v3/projects/{project_id}/timeSeries?
+GET https://monitoring.googleapis.com/v3/projects/{SECOPS_PROJECT_ID}/timeSeries?
   filter=metric.type = "chronicle.googleapis.com/{metric_type}"
   &aggregation.groupByFields=resource.labels.log_type, resource.labels.collector_id
   &aggregation.crossSeriesReducer=REDUCE_NONE
@@ -126,58 +105,315 @@ GET https://monitoring.googleapis.com/v3/projects/{project_id}/timeSeries?
   &aggregation.alignmentPeriod={alignment_seconds}s
   &interval.startTime={RFC3339_START}
   &interval.endTime={RFC3339_END}
-  &orderBy=resource.labels.log_type
-  &pageSize=10000
-```
-
-### The 30m Reconciliation Logic:
-```python
-# For each log_type and collector_id:
-val_30m = sum(pt.value for pt in series_30m)
-val_rollup = sum(pt.value for pt in series_rollup)
-
-# Enforce official record
-official_record = max(val_30m, val_rollup)
 ```
 
 ---
 
-## 📊 Deprecated BigQuery vs Cloud Monitoring Mapping
+## 📦 Prerequisites & Dependencies (Zero Assumptions Guide)
 
-| BigQuery Field (`datalake.ingestion_metrics`) | Cloud Monitoring API Equivalent | Notes |
-| :--- | :--- | :--- |
-| `log_type` | `resource.labels.log_type` | Grouped in query |
-| `collector_ids` | `resource.labels.collector_id` | Aggregated with `:RQ:` delimiter |
-| `size_mb` | `chronicle.googleapis.com/ingestion/log/bytes_count` | `bytes / (1000 * 1000)` |
-| `event_count` | `chronicle.googleapis.com/ingestion/log/record_count` | Raw logs received |
-| `normalized_events` | `chronicle.googleapis.com/normalizer/event/record_count` | Validated UDM events |
-| `error_events` | `record_count - normalized_events` | Unparsed / validation failures |
-| `drop_reason_code` | Health status indicator | Flags parser syntax errors |
+If you are setting this up for the first time, you need:
+
+1. **A Google Cloud Platform (GCP) Project** where your Google SecOps instance is bound (referred to as `SECOPS_PROJECT_ID`).
+2. **Google Cloud CLI (`gcloud`)** installed on your administrative workstation ([Installation Guide](https://cloud.google.com/sdk/docs/install)).
+3. **Python 3.9+** (if running natively) OR **Docker 20.10+** (if running via containers).
+4. **Network Egress**: HTTPS outbound connectivity (TCP port 443) to `https://monitoring.googleapis.com`.
 
 ---
 
-## 🌐 REST API Endpoints
+## 🔐 IAM & Service Account Setup (Least Privilege)
 
-The Flask application exposes a complete REST API:
+To pull metrics from Google Cloud Monitoring, the application needs an identity authorized to read monitoring data. Follow these step-by-step instructions to create a dedicated, least-privilege service account.
 
-| Endpoint | Method | Description |
-| :--- | :---: | :--- |
-| `/api/status` | GET | Connection mode (Live/Mock), GCP project ID, and auth diagnostics |
-| `/api/ingestion/summary?period=daily\|weekly\|monthly\|yearly` | GET | Ingestion totals (Bytes, Records, Normalized UDM, Health counts) |
-| `/api/ingestion/breakdown?period=daily\|weekly\|monthly\|yearly` | GET | Detailed breakdown by Log Type and Collector IDs |
-| `/api/ingestion/timeseries?period=daily\|weekly\|monthly\|yearly` | GET | Time-series data points for volume and records trends |
-| `/api/ingestion/reconcile?period=daily\|weekly\|monthly\|yearly` | GET | Customer 30m sum vs rollup comparison with official max record |
-| `/api/ingestion/bigquery-compat?period=daily\|weekly\|monthly\|yearly` | GET | Formatted in the legacy BigQuery table schema |
-| `/api/export/csv?period=daily\|weekly\|monthly\|yearly` | GET | Download summary CSV |
-| `/api/export/json?period=daily\|weekly\|monthly\|yearly` | GET | Download summary JSON |
-| `/api/settings` | POST | Dynamically update Project ID, Credentials file, or Mock mode |
-| `/api/refresh` | POST | Invalidate metric cache and trigger live query |
+### Step 1: Enable Cloud Monitoring API
+
+Ensure the Cloud Monitoring API is active on your SecOps Google Cloud project:
+
+```bash
+gcloud services enable monitoring.googleapis.com \
+  --project="your-secops-project-id"
+```
+
+### Step 2: Create a Dedicated Service Account
+
+Create a workload-specific service account. Do **not** use default Compute Engine or App Engine service accounts:
+
+```bash
+export SECOPS_PROJECT_ID="your-secops-project-id"
+export SA_NAME="secops-ingest-monitor-sa"
+export SA_EMAIL="${SA_NAME}@${SECOPS_PROJECT_ID}.iam.gserviceaccount.com"
+
+gcloud iam service-accounts create "${SA_NAME}" \
+  --project="${SECOPS_PROJECT_ID}" \
+  --display-name="SecOps Ingestion Monitor Service Account" \
+  --description="Read-only identity for querying Chronicle ingestion metrics from Cloud Monitoring"
+```
+
+### Step 3: Grant Least-Privilege IAM Roles
+
+Grant **only** the `roles/monitoring.viewer` role to this service account on the target project. 
+
+> [!IMPORTANT]
+> **Least Privilege Principle**:
+> - **DO NOT** grant primitive roles (`roles/viewer`, `roles/editor`, or `roles/owner`).
+> - `roles/monitoring.viewer` (`Monitoring Viewer`) grants read-only access to time series metrics, metric descriptors, and monitoring groups. It cannot read logs, modify alerts, or access underlying Cloud Storage / BigQuery data.
+
+```bash
+gcloud projects add-iam-policy-binding "${SECOPS_PROJECT_ID}" \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/monitoring.viewer"
+```
+
+### Step 4: Provision Credentials
+
+Depending on where you run the tool, select **one** of the following authentication strategies:
+
+#### Option A: Running on Google Cloud (Compute Engine, GKE, or Cloud Run) — *Recommended (Keyless)*
+Attach the service account directly to the VM or workload. The Google Cloud SDK and Python libraries will automatically fetch rotating OAuth2 JWT tokens from the internal metadata server (`http://metadata.google.internal`). No credential files or private keys are created or stored.
+
+- **Compute Engine VM**:
+  ```bash
+  gcloud compute instances set-service-account INSTANCE_NAME \
+    --zone=ZONE \
+    --service-account="${SA_EMAIL}" \
+    --scopes="cloud-platform"
+  ```
+
+#### Option B: Running Outside GCP (On-Premises, Laptop, or External Cloud) — *Service Account Key*
+Generate a JSON credential key file:
+
+```bash
+gcloud iam service-accounts keys create credentials.json \
+  --iam-account="${SA_EMAIL}" \
+  --project="${SECOPS_PROJECT_ID}"
+```
+
+> [!WARNING]
+> Keep `credentials.json` secure. Never commit it to git. The `.gitignore` file in this repository is already configured to block `*.json` credential files.
+
+#### Option C: Local Developer Workstation (Application Default Credentials)
+If you already log in with your corporate Google identity via `gcloud`:
+
+```bash
+gcloud auth application-default login
+```
 
 ---
 
-## 🧪 Running Automated Tests
+## ⚙️ Environment Variables & Configuration
+
+The application can be fully configured via environment variables:
+
+| Variable | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `SECOPS_PROJECT_ID` | `string` | `secops-superweird` | The GCP Project ID containing the SecOps Cloud Monitoring metrics. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `string` | *None* | Path to the service account JSON key file (required for Option B). |
+| `PORT` | `integer` | `8080` | Port on which the HTTP/HTTPS web server listens. |
+| `SSL_ENABLED` | `boolean` | `false` | Enables HTTPS termination directly in the application (`true`/`false`). |
+| `SSL_CERT_PATH` | `string` | `certs/cert.pem` | Path to public SSL certificate file (PEM format). |
+| `SSL_KEY_PATH` | `string` | `certs/key.pem` | Path to private SSL key file (PEM format). |
+| `MOCK_MODE` | `boolean` | `false` | When `true`, serves synthetic demo data without making GCP API calls. |
+
+---
+
+## 🚀 Installation & Quick Start
+
+### Method 1: Local Python (Native)
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/your-username/google-secops-ingestion-tracking.git
+   cd google-secops-ingestion-tracking
+   ```
+
+2. **Create and activate a virtual environment**:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+4. **Launch the Web Dashboard**:
+   ```bash
+   export SECOPS_PROJECT_ID="your-secops-project-id"
+   export GOOGLE_APPLICATION_CREDENTIALS="/path/to/credentials.json"
+   export PORT=8080
+
+   python3 app.py
+   ```
+   Open your browser to: `http://localhost:8080`
+
+---
+
+### Method 2: Docker Container
+
+1. **Build the container image**:
+   ```bash
+   docker build -t secops-ingestion:latest .
+   ```
+
+2. **Run in Mock / Demo Mode (No GCP credentials required)**:
+   ```bash
+   docker run -d --name secops-ingest-demo \
+     -p 8080:8080 \
+     -e MOCK_MODE=true \
+     secops-ingestion:latest
+   ```
+
+3. **Run in Live Mode with Service Account Key**:
+   ```bash
+   docker run -d --name secops-ingest-prod \
+     -p 8080:8080 \
+     -v $(pwd)/credentials.json:/app/credentials.json:ro \
+     -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
+     -e SECOPS_PROJECT_ID="your-secops-project-id" \
+     -e MOCK_MODE=false \
+     secops-ingestion:latest
+   ```
+
+---
+
+### Method 3: Docker Compose
+
+Create a `docker-compose.yml` file:
+
+```yaml
+version: '3.8'
+
+services:
+  secops-ingestion:
+    build: .
+    container_name: secops-ingestion-monitor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - SECOPS_PROJECT_ID=your-secops-project-id
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
+      - MOCK_MODE=false
+      - PORT=8080
+    volumes:
+      - ./credentials.json:/app/credentials.json:ro
+```
+
+Run:
+```bash
+docker compose up -d
+```
+
+---
+
+### Method 4: CLI Reporting & Exports
+
+You can generate reports directly in your terminal or export them to CSV, JSON, or Markdown:
+
+```bash
+# Display daily summary with 30m reconciliation
+./secops_ingestion_cli.py --project your-secops-project-id --timeframe daily --reconcile-30m
+
+# Display weekly summary
+./secops_ingestion_cli.py --project your-secops-project-id --timeframe weekly
+
+# Display full 12-month summary
+./secops_ingestion_cli.py --project your-secops-project-id --timeframe yearly
+
+# Export report to files
+./secops_ingestion_cli.py \
+  --project your-secops-project-id \
+  --timeframe daily \
+  --export-csv report.csv \
+  --export-json report.json \
+  --export-md report.md
+
+# Run offline in mock mode
+./secops_ingestion_cli.py --mock --timeframe daily --reconcile-30m
+```
+
+---
+
+## ⏱️ Automated Telemetry Collection & Scheduling
+
+The web application provides a dedicated collection endpoint:
+
+```http
+POST /api/collect
+```
+
+When invoked, the server queries Cloud Monitoring for all 4 periods (`daily`, `weekly`, `monthly`, `yearly`), calculates reconciliations, and updates its in-memory cache.
+
+### Automated Hourly Cron Setup
+
+To schedule automated hourly metrics collection on a Linux host or VM:
+
+```bash
+# Open crontab editor
+crontab -e
+
+# Add an hourly job:
+0 * * * * curl -s -X POST http://localhost:8080/api/collect > /dev/null 2>&1
+```
+
+### Google Cloud Scheduler Setup (Optional)
+
+If running behind a Google Cloud Load Balancer or public domain:
+
+```bash
+gcloud scheduler jobs create http secops-hourly-collector \
+  --location="us-central1" \
+  --schedule="0 * * * *" \
+  --time-zone="UTC" \
+  --uri="https://your-domain.com/api/collect" \
+  --http-method="POST"
+```
+
+---
+
+## 🌐 REST API Reference
+
+| Endpoint | Method | Query Parameters | Description |
+| :--- | :---: | :--- | :--- |
+| `/api/status` | `GET` | *None* | Connection mode (`live`/`mock`), project ID (redacted), and auth diagnostics. |
+| `/api/ingestion/summary` | `GET` | `period` (`daily`, `weekly`, `monthly`, `yearly`) | High-level KPI totals (Bytes, Records, Normalized UDM, Error counts). |
+| `/api/ingestion/breakdown` | `GET` | `period` | Detailed metrics broken down by `log_type` and `collector_id`. |
+| `/api/ingestion/timeseries` | `GET` | `period` | Formatted timestamp points for Chart.js volume and records trend lines. |
+| `/api/ingestion/reconcile` | `GET` | `period` | Side-by-side comparison of `sum(30m buckets)` vs `rollup` with official max. |
+| `/api/ingestion/bigquery-compat` | `GET` | `period` | Telemetry formatted in legacy `datalake.ingestion_metrics` schema. |
+| `/api/collect` | `POST` | *None* | Triggers a fresh telemetry extraction across all timeframes. |
+| `/api/export/csv` | `GET` | `period` | Downloads the ingestion summary as a CSV file. |
+| `/api/export/json` | `GET` | `period` | Downloads the ingestion summary as structured JSON. |
+| `/api/refresh` | `POST` | *None* | Invalidates metric cache for on-demand UI refreshes. |
+
+---
+
+## 🧪 Testing & Quality Assurance
+
+A comprehensive unit test suite is included in the `tests/` directory:
 
 ```bash
 python3 -m unittest discover tests
 ```
-All 13 test suites verify metric math, derived fields, 30m reconciliation, BigQuery mapping, and REST API endpoints.
+
+### What the Tests Cover:
+1. **Mathematical Accuracy**: Validates bytes-to-MB/GB conversions and normalization ratio calculations.
+2. **Reconciliation Rules**: Asserts that `max(sum_30m, rollup)` is strictly honored under edge cases.
+3. **BigQuery Schema Compatibility**: Verifies that delimiter `:RQ:` and field mappings match legacy BigQuery table schemas.
+4. **Mock Mode Fallback**: Guarantees that the app runs completely offline without network or GCP dependencies.
+5. **REST API Endpoints**: Tests HTTP response status codes, JSON structures, and input validation.
+
+---
+
+## 🔒 Security & Redaction
+
+- **Least Privilege**: The application requires only `roles/monitoring.viewer`. It cannot modify infrastructure, view raw logs, or access proprietary security detections.
+- **Tenant Redaction**: When displaying API queries in the web editor, tenant-specific project identifiers are sanitized to prevent accidental data leakage during demos or screenshots.
+- **No Secret Hardcoding**: Credential paths and project IDs are injected exclusively via environment variables.
+
+---
+
+## 📄 License
+
+This project is licensed under the Apache 2.0 License.
