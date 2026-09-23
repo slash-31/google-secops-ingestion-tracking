@@ -1,539 +1,763 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Google SecOps Ingestion Intelligence | {{ project_id }}</title>
-  <link rel="stylesheet" href="/static/css/dashboard.css">
+  <title>Google SecOps Ingestion Intelligence | Cyber Bento Dashboard</title>
+  
+  <!-- Local Tailwind CSS Engine -->
+  <script src="/static/js/tailwind.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            obsidian: {
+              950: '#05070c',
+              900: '#080c14',
+              850: '#0d1320',
+              800: '#121a2d',
+              750: '#17223b',
+              700: '#1e2c4c'
+            },
+            cyber: {
+              cyan: '#00f2fe',
+              purple: '#a855f7',
+              emerald: '#10b981',
+              blue: '#4facfe',
+              amber: '#f59e0b',
+              rose: '#f43f5e'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'SFMono-Regular', 'Menlo', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Cyber Bento Stylesheet & Local Chart.js + Alpine.js -->
+  <link rel="stylesheet" href="/static/css/bento.css">
   <script src="/static/js/chart.min.js"></script>
+  <script src="/static/js/app-bento.js"></script>
+  <script src="/static/js/alpine.min.js" defer></script>
 </head>
-<body>
-  <!-- Top Navigation Header -->
-  <header class="top-header">
-    <div class="brand-wrapper">
-      <div class="brand-icon">
-        <svg viewBox="0 0 24 24">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-        </svg>
+<body x-data="secopsDashboard()" class="bg-obsidian-950 text-slate-100 min-h-screen relative flex flex-col antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+
+  <!-- Ambient Aurora Glow & Background Mesh -->
+  <div class="aurora-bg">
+    <div class="aurora-mesh"></div>
+  </div>
+
+  <!-- Toast Notification Overlay -->
+  <div x-cloak x-show="toast.show" 
+       x-transition:enter="transition ease-out duration-300 transform"
+       x-transition:enter-start="opacity-0 translate-y-4 scale-95"
+       x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+       x-transition:leave="transition ease-in duration-200 transform"
+       x-transition:leave-start="opacity-100 translate-y-0 scale-100"
+       x-transition:leave-end="opacity-0 translate-y-4 scale-95"
+       class="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-xl text-sm font-medium"
+       :class="{
+         'bg-cyan-950/80 border-cyan-500/40 text-cyan-200 shadow-cyan-950/50': toast.type === 'info',
+         'bg-emerald-950/80 border-emerald-500/40 text-emerald-200 shadow-emerald-950/50': toast.type === 'success',
+         'bg-amber-950/80 border-amber-500/40 text-amber-200 shadow-amber-950/50': toast.type === 'warning',
+         'bg-rose-950/80 border-rose-500/40 text-rose-200 shadow-rose-950/50': toast.type === 'danger'
+       }">
+    <span class="inline-block w-2 h-2 rounded-full"
+          :class="{
+            'bg-cyan-400 animate-ping': toast.type === 'info',
+            'bg-emerald-400': toast.type === 'success',
+            'bg-amber-400': toast.type === 'warning',
+            'bg-rose-400': toast.type === 'danger'
+          }"></span>
+    <span x-text="toast.message"></span>
+  </div>
+
+  <!-- Main Top Navigation -->
+  <header class="sticky top-0 z-40 border-b border-white/5 bg-obsidian-900/80 backdrop-blur-2xl px-4 lg:px-8 py-3.5 transition-all">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      
+      <!-- Brand & Status Identity -->
+      <div class="flex items-center gap-3.5 w-full md:w-auto justify-between md:justify-start">
+        <div class="flex items-center gap-3">
+          <!-- Cyber SecOps Logo Icon -->
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 border border-white/20">
+            <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="font-bold text-base tracking-tight text-white flex items-center gap-1.5">
+                Google SecOps
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">Intelligence</span>
+              </h1>
+            </div>
+            <p class="text-xs text-slate-400 font-mono tracking-tight">Cloud Monitoring Metrics API v3</p>
+          </div>
+        </div>
+
+        <!-- Mobile Quick Status -->
+        <div class="flex md:hidden items-center gap-2">
+          <span class="pulse-emerald"></span>
+          <span class="text-xs font-mono text-slate-300" x-text="status.mockMode ? 'DEMO' : 'LIVE'"></span>
+        </div>
       </div>
-      <div>
-        <h1 class="brand-title">Google SecOps Ingestion Intelligence</h1>
-        <div class="brand-subtitle">Cloud Monitoring Metrics Engine (v3 projects.timeSeries)</div>
-      </div>
-    </div>
 
-    <div class="header-controls">
-      <!-- Project Identifier Pill -->
-      <div class="badge badge-project" id="projectBadge" title="Active GCP Project">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
-        </svg>
-        <span id="currentProjectText">{{ project_id }}</span>
-      </div>
+      <!-- Segmented Timeframe Switcher & Control Pills -->
+      <div class="flex items-center gap-3 flex-wrap justify-center w-full md:w-auto">
+        
+        <!-- Timeframe Segmented Control -->
+        <div class="segmented-pill-container">
+          <button class="segmented-pill-btn" :class="{ 'active': period === 'daily' }" @click="setPeriod('daily')">
+            Daily <span class="text-[10px] opacity-60 font-mono">24h</span>
+          </button>
+          <button class="segmented-pill-btn" :class="{ 'active': period === 'weekly' }" @click="setPeriod('weekly')">
+            Weekly <span class="text-[10px] opacity-60 font-mono">7d</span>
+          </button>
+          <button class="segmented-pill-btn" :class="{ 'active': period === 'monthly' }" @click="setPeriod('monthly')">
+            Monthly <span class="text-[10px] opacity-60 font-mono">30d</span>
+          </button>
+          <button class="segmented-pill-btn" :class="{ 'active': period === 'yearly' }" @click="setPeriod('yearly')">
+            12 Mo <span class="text-[10px] opacity-60 font-mono">1y</span>
+          </button>
+        </div>
 
-      <!-- Auth Mode Pill -->
-      <div class="badge {{ 'badge-mock' if mock_mode else 'badge-live' }}" id="modeBadge">
-        <span class="pulse-dot"></span>
-        <span id="modeText">{{ 'MOCK / DEMO' if mock_mode else 'GCP LIVE' }}</span>
-      </div>
+        <!-- Badges & Action Buttons -->
+        <div class="hidden lg:flex items-center gap-2">
+          <!-- Live / Mock Indicator Badge -->
+          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono"
+               :class="status.mockMode ? 'badge-glow-amber' : 'badge-glow-emerald'">
+            <span :class="status.mockMode ? 'pulse-amber' : 'pulse-emerald'"></span>
+            <span x-text="status.mockMode ? 'MOCK / DEMO' : 'GCP LIVE'"></span>
+          </div>
 
-      <!-- SSL / HTTPS Pill -->
-      <div class="badge {{ 'badge-ssl' if ssl_enabled else 'badge-ssl badge-ssl-disabled' }}" id="sslBadge" title="Transport Security">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
-        </svg>
-        <span id="sslText">{{ 'HTTPS' if ssl_enabled else 'HTTP' }}</span>
-      </div>
+          <!-- Project ID Pill (Clickable) -->
+          <button @click="settingsModalOpen = true" 
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition">
+            <svg class="w-3.5 h-3.5 text-cyan-400" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+            </svg>
+            <span x-text="status.projectId"></span>
+          </button>
 
-      <!-- Timeframe Nav Pills -->
-      <nav class="timeframe-nav" aria-label="Timeframe selector">
-        <button class="timeframe-btn active" data-period="daily">Daily (24h)</button>
-        <button class="timeframe-btn" data-period="weekly">Weekly (7d)</button>
-        <button class="timeframe-btn" data-period="monthly">Monthly (30d)</button>
-        <button class="timeframe-btn" data-period="yearly">12 Months (1y)</button>
-      </nav>
+          <!-- SSL / Transport Security Pill -->
+          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono {{ 'badge-ssl' if ssl_enabled else 'badge-ssl badge-ssl-disabled' }} bg-white/5 text-slate-300 border border-white/10" id="sslBadge">
+            <svg class="w-3.5 h-3.5 text-cyan-400" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+            </svg>
+            <span id="sslText">{{ 'HTTPS' if ssl_enabled else 'HTTP' }}</span>
+          </div>
+        </div>
 
-      <!-- Action Buttons -->
-      <button class="btn btn-secondary" id="btnRefresh" title="Refresh metrics from Cloud Monitoring">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-        </svg>
-        Refresh
-      </button>
+        <!-- Quick Action Trigger Buttons -->
+        <div class="flex items-center gap-1.5">
+          <!-- Refresh Button -->
+          <button @click="refreshDashboard(true)" 
+                  :disabled="refreshing || loading"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 transition active:scale-95 disabled:opacity-50">
+            <svg class="w-3.5 h-3.5 text-cyan-400" :class="{ 'animate-spin': refreshing }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            <span class="hidden sm:inline">Refresh</span>
+          </button>
 
-      <button class="btn btn-secondary" id="btnSettings" title="Configure Project & Auth">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-        </svg>
-        Settings
-      </button>
+          <!-- Collect Telemetry Button -->
+          <button @click="triggerCollect()" 
+                  :disabled="collecting || loading"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 text-cyan-300 border border-cyan-500/30 transition active:scale-95 disabled:opacity-50">
+            <svg class="w-3.5 h-3.5 text-cyan-400" :class="{ 'animate-pulse': collecting }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            <span class="hidden sm:inline" x-text="collecting ? 'Collecting...' : 'Collect'"></span>
+          </button>
 
-      <div style="display:flex; gap:4px;">
-        <button class="btn btn-secondary" id="btnExportCsv" title="Export CSV">CSV</button>
-        <button class="btn btn-secondary" id="btnExportJson" title="Export JSON">JSON</button>
+          <!-- Auto-Refresh Toggle -->
+          <button @click="toggleAutoRefresh()" 
+                  class="px-2.5 py-1.5 rounded-xl text-xs font-mono border transition flex items-center gap-1.5"
+                  :class="autoRefresh ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' : 'bg-white/5 text-slate-400 border-white/10'">
+            <span class="w-1.5 h-1.5 rounded-full" :class="autoRefresh ? 'bg-cyan-400 animate-ping' : 'bg-slate-500'"></span>
+            <span x-text="autoRefresh ? countdown + 's' : 'Off'"></span>
+          </button>
+
+          <!-- Settings Modal Button -->
+          <button @click="settingsModalOpen = true" 
+                  class="p-2 rounded-xl text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 transition"
+                  title="Dashboard Settings & Auth Configuration">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+        </div>
+
       </div>
     </div>
   </header>
 
-  <main class="dashboard-container">
-    <!-- Interval info banner -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+  <!-- Main Content Dashboard Container -->
+  <main class="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+
+    <!-- Sub-header Meta Banner -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
       <div>
-        <h2 style="font-size: 1.35rem; font-weight: 700; color: #fff;" id="viewTitle">Daily Ingestion Summary</h2>
-        <span style="font-size: 0.8rem; color: var(--text-muted);" id="viewIntervalText">Loading interval window...</span>
+        <h2 class="text-xl font-bold tracking-tight text-white flex items-center gap-2" x-text="summary.periodTitle">
+          Daily Ingestion Summary
+        </h2>
+        <p class="text-xs text-slate-400 font-mono mt-0.5" x-text="summary.intervalStr || 'Synchronizing Cloud Monitoring stream...'"></p>
       </div>
-      <div style="font-size: 0.8rem; color: var(--text-dim);" id="apiLatencyText">Cloud Monitoring API v3 Ready</div>
+      <div class="flex items-center gap-3 text-xs font-mono text-slate-400">
+        <span class="flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+          Latency: <span class="text-cyan-300 font-semibold" x-text="summary.latencyMs + 'ms'"></span>
+        </span>
+        <span class="text-slate-600">•</span>
+        <span>Reconciliation: <span class="text-emerald-400">max(sum_30m, rollup)</span></span>
+      </div>
     </div>
 
-    <!-- KPI Summary Grid -->
-    <section class="kpi-grid">
-      <!-- KPI 1: Ingestion Volume -->
-      <article class="kpi-card">
-        <div class="kpi-header">
-          <span class="kpi-label">Total Ingestion Volume</span>
-          <div class="kpi-icon-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-            </svg>
+    <!-- ========================================================================= -->
+    <!-- BENTO ROW 1: CORE TELEMETRY KPIS (4 ASYMMETRIC BENTO TILES)                -->
+    <!-- ========================================================================= -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+      <!-- Bento Tile 1: Total Volume (Hero Tile with Cyan Accent) -->
+      <article class="bento-card bento-hero p-5 flex flex-col justify-between group">
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400/90 font-mono">Raw Ingestion Volume</span>
+            <div class="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              </svg>
+            </div>
+          </div>
+          <div class="mt-4 flex items-baseline gap-2">
+            <span class="text-3xl lg:text-4xl font-extrabold tracking-tight text-white glow-cyan font-mono" x-text="anim.volumeGb.toFixed(2)">0.00</span>
+            <span class="text-base font-bold text-cyan-400 font-mono">GB</span>
           </div>
         </div>
-        <div class="kpi-value" id="kpiVolume">0.00 GB</div>
-        <div class="kpi-meta">
-          <span id="kpiVolumeMb">0 MB</span> • <span id="kpiActiveLogTypes">0 Log Types</span>
+        <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400 font-mono">
+          <span x-text="formatBytes(summary.totalBytes)"></span>
+          <span class="text-slate-500">|</span>
+          <span class="text-slate-300" x-text="summary.activeSources + ' Log Sources'"></span>
         </div>
       </article>
 
-      <!-- KPI 2: Raw Records Ingested -->
-      <article class="kpi-card">
-        <div class="kpi-header">
-          <span class="kpi-label">Raw Ingested Records</span>
-          <div class="kpi-icon-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <!-- Bento Tile 2: Raw Ingested Records (Electric Blue) -->
+      <article class="bento-card p-5 flex flex-col justify-between group">
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">Ingested Records</span>
+            <div class="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-110 transition">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6"/>
+                <line x1="8" y1="12" x2="21" y2="12"/>
+                <line x1="8" y1="18" x2="21" y2="18"/>
+                <line x1="3" y1="6" x2="3.01" y2="6"/>
+                <line x1="3" y1="12" x2="3.01" y2="12"/>
+                <line x1="3" y1="18" x2="3.01" y2="18"/>
+              </svg>
+            </div>
+          </div>
+          <div class="mt-4">
+            <span class="text-3xl lg:text-4xl font-extrabold tracking-tight text-white font-mono" x-text="formatNumber(anim.records)">0</span>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400 font-mono">
+          <span class="text-slate-400 truncate">ingestion/log/record_count</span>
+        </div>
+      </article>
+
+      <!-- Bento Tile 3: Normalized UDM Events (Neon Emerald with Circular Meter) -->
+      <article class="bento-card p-5 flex flex-col justify-between group">
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400/90 font-mono">Normalized UDM</span>
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                <polyline points="2 17 12 22 22 17"/>
+                <polyline points="2 12 12 17 22 12"/>
+              </svg>
+            </div>
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <div>
+              <span class="text-3xl lg:text-4xl font-extrabold tracking-tight text-white font-mono" x-text="formatNumber(anim.events)">0</span>
+              <div class="text-xs text-emerald-400 font-mono mt-1 font-semibold flex items-center gap-1">
+                <span x-text="anim.ratio.toFixed(1) + '%'">100%</span>
+                <span class="text-slate-400 font-normal">efficiency</span>
+              </div>
+            </div>
+
+            <!-- Mini Circular Gauge -->
+            <div class="relative w-12 h-12 flex items-center justify-center">
+              <svg class="w-12 h-12 radial-progress-ring" viewBox="0 0 36 36">
+                <path class="radial-progress-bg" stroke-width="3.5" fill="none"
+                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                <path class="radial-progress-bar" stroke="#10b981" stroke-width="3.5" fill="none"
+                      :stroke-dasharray="anim.ratio + ', 100'"
+                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400 font-mono">
+          <span class="truncate">normalizer/event/record_count</span>
+        </div>
+      </article>
+
+      <!-- Bento Tile 4: Health & Parser Accuracy (Neon Purple) -->
+      <article class="bento-card p-5 flex flex-col justify-between group">
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wider text-purple-400/90 font-mono">Parser Health</span>
+            <div class="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 group-hover:scale-110 transition">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+            </div>
+          </div>
+          <div class="mt-4">
+            <div class="flex items-baseline gap-2">
+              <span class="text-3xl lg:text-4xl font-extrabold tracking-tight text-white font-mono" x-text="formatNumber(summary.unparsedRecords)">0</span>
+              <span class="text-xs text-slate-400 font-mono">unparsed</span>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-xs font-mono">
+          <span class="text-emerald-400 font-semibold" x-text="summary.healthyCount + ' Optimal'"></span>
+          <span class="text-slate-500">|</span>
+          <span class="text-amber-400" x-text="summary.errorCount + ' Degraded'"></span>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- BENTO ROW 2: VISUALIZATION EXPANSION (CHART SPLINE & DONUT SHARE)          -->
+    <!-- ========================================================================= -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Main Ingestion Telemetry Time-Series Chart (2 Columns Wide) -->
+      <article class="bento-card p-6 lg:col-span-2 flex flex-col justify-between">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+              Ingestion Throughput Over Time
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-slate-400 border border-white/10" x-text="period"></span>
+            </h3>
+            <p class="text-xs text-slate-400 font-mono mt-0.5">30-minute intervals aligned with rolling aggregate sum</p>
+          </div>
+
+          <!-- Chart Metric Toggle -->
+          <div class="segmented-pill-container self-start sm:self-auto">
+            <button class="segmented-pill-btn text-xs py-1 px-3" :class="{ 'active': chartMetric === 'volume' }" @click="setChartMetric('volume')">
+              Volume
+            </button>
+            <button class="segmented-pill-btn text-xs py-1 px-3" :class="{ 'active': chartMetric === 'records' }" @click="setChartMetric('records')">
+              Records
+            </button>
+            <button class="segmented-pill-btn text-xs py-1 px-3" :class="{ 'active': chartMetric === 'both' }" @click="setChartMetric('both')">
+              Both
+            </button>
+          </div>
+        </div>
+
+        <!-- Canvas Container -->
+        <div class="relative w-full h-[280px]">
+          <canvas id="bentoVolumeChart"></canvas>
+        </div>
+      </article>
+
+      <!-- Volume Share Distribution Donut Chart (1 Column Wide) -->
+      <article class="bento-card p-6 flex flex-col justify-between">
+        <div>
+          <h3 class="text-base font-bold text-white tracking-tight flex items-center justify-between">
+            Top Log Sources
+            <span class="text-xs font-mono text-cyan-400">Share %</span>
+          </h3>
+          <p class="text-xs text-slate-400 font-mono mt-0.5">Volume distribution by primary log_type</p>
+        </div>
+
+        <div class="relative w-full h-[220px] my-auto">
+          <canvas id="bentoDonutChart"></canvas>
+        </div>
+
+        <div class="pt-3 border-t border-white/5 text-xs text-slate-400 font-mono flex items-center justify-between">
+          <span>Total active types</span>
+          <span class="text-cyan-400 font-bold" x-text="summary.activeSources"></span>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- BENTO ROW 3: DEEP AUDIT, RECONCILIATION & LOG SOURCE EXPLORER             -->
+    <!-- ========================================================================= -->
+    <section class="bento-card p-6">
+      
+      <!-- Explorer Header & Tab Navigation -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
+        
+        <!-- Tab Bar -->
+        <div class="flex items-center gap-2 overflow-x-auto">
+          <button class="bento-tab-btn" :class="{ 'active': activeTab === 'sources' }" @click="setTab('sources')">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="8" y1="6" x2="21" y2="6"/>
               <line x1="8" y1="12" x2="21" y2="12"/>
               <line x1="8" y1="18" x2="21" y2="18"/>
-              <line x1="3" y1="6" x2="3.01" y2="6"/>
-              <line x1="3" y1="12" x2="3.01" y2="12"/>
-              <line x1="3" y1="18" x2="3.01" y2="18"/>
             </svg>
-          </div>
-        </div>
-        <div class="kpi-value" id="kpiRecords">0</div>
-        <div class="kpi-meta">
-          <span>ingestion/log/record_count</span>
-        </div>
-      </article>
+            Log Sources Explorer
+            <span class="text-xs px-2 py-0.5 rounded-full bg-white/10 font-mono" x-text="filteredSources.length"></span>
+          </button>
 
-      <!-- KPI 3: Normalized UDM Events -->
-      <article class="kpi-card">
-        <div class="kpi-header">
-          <span class="kpi-label">Normalized UDM Events</span>
-          <div class="kpi-icon-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-              <polyline points="2 17 12 22 22 17"/>
-              <polyline points="2 12 12 17 22 12"/>
+          <button class="bento-tab-btn" :class="{ 'active': activeTab === 'reconciliation' }" @click="setTab('reconciliation')">
+            <svg class="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
             </svg>
-          </div>
-        </div>
-        <div class="kpi-value" id="kpiEvents">0</div>
-        <div class="kpi-meta">
-          <span>normalizer/event/record_count</span>
-        </div>
-      </article>
+            30m Rollup Reconciliation
+          </button>
 
-      <!-- KPI 4: Normalization Efficiency Ratio -->
-      <article class="kpi-card">
-        <div class="kpi-header">
-          <span class="kpi-label">Normalization Success</span>
-          <div class="kpi-icon-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-              <polyline points="22 4 12 14.01 9 11.01"/>
+          <button class="bento-tab-btn" :class="{ 'active': activeTab === 'bigquery' }" @click="setTab('bigquery')">
+            <svg class="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <ellipse cx="12" cy="5" rx="9" ry="3"/>
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
             </svg>
-          </div>
-        </div>
-        <div class="kpi-value" id="kpiNormRatio">0.0%</div>
-        <div class="kpi-meta">
-          <span id="kpiHealthBreakdown">0 Healthy • 0 Warning • 0 Critical</span>
-        </div>
-        <div class="progress-bar-container">
-          <div class="progress-bar-fill" id="normProgressBar" style="width: 0%;"></div>
-        </div>
-      </article>
-    </section>
+            BigQuery Datalake Schema
+          </button>
 
-    <!-- Analytics Charts Grid -->
-    <section class="charts-grid">
-      <!-- Volume Trend Chart -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <h3 class="chart-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          <button class="bento-tab-btn" :class="{ 'active': activeTab === 'inspector' }" @click="setTab('inspector')">
+            <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 17 10 11 4 5"/>
+              <line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
-            Ingestion Volume Trend (MB)
-          </h3>
-          <span style="font-size: 0.75rem; color: var(--text-muted);">chronicle.googleapis.com/ingestion/log/bytes_count</span>
+            API Query Inspector
+          </button>
         </div>
-        <div class="chart-canvas-wrapper">
-          <canvas id="volumeTrendChart"></canvas>
-        </div>
-      </div>
 
-      <!-- Share by Log Type Chart -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <h3 class="chart-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z"/>
-            </svg>
-            Ingestion Volume by Log Type
-          </h3>
-        </div>
-        <div class="chart-canvas-wrapper">
-          <canvas id="logTypeDonutChart"></canvas>
-        </div>
-      </div>
-    </section>
-
-    <!-- Deep Dive Tabs -->
-    <nav class="tab-navigation">
-      <button class="tab-btn active" data-tab="tabBreakdown">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-          <line x1="3" y1="9" x2="21" y2="9"/>
-          <line x1="9" y1="21" x2="9" y2="9"/>
-        </svg>
-        Log Sources Breakdown
-      </button>
-
-      <button class="tab-btn" data-tab="tabReconcile">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <polyline points="12 6 12 12 14 14"/>
-        </svg>
-        30m Rollup Reconciliation
-      </button>
-
-      <button class="tab-btn" data-tab="tabBigQuery">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/>
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-        </svg>
-        BigQuery Datalake Schema
-      </button>
-
-      <button class="tab-btn" data-tab="tabInspector">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="16 18 22 12 16 6"/>
-          <polyline points="8 6 2 12 8 18"/>
-        </svg>
-        API Query Editor
-      </button>
-
-      <button class="tab-btn" data-tab="tabHealth">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-          <line x1="12" y1="9" x2="12" y2="13"/>
-          <line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-        Ingestion Health & Alerts
-      </button>
-    </nav>
-
-    <!-- Tab 1: Breakdown Table -->
-    <div class="tab-content active" id="tabBreakdown">
-      <div class="table-card">
-        <div class="table-toolbar">
-          <div class="search-input-wrapper">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <!-- Table Filters & Exports -->
+        <div class="flex items-center gap-2 flex-wrap" x-show="activeTab === 'sources'">
+          <!-- Live Search Input -->
+          <div class="relative">
+            <svg class="w-4 h-4 absolute left-3 top-2.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input type="text" class="search-input" id="searchTable" placeholder="Filter log types or collectors...">
+            <input type="text" 
+                   x-model="searchQuery" 
+                   placeholder="Search log types or collectors..." 
+                   class="cyber-input pl-9 pr-3 text-xs w-56 font-mono">
           </div>
-          <div style="font-size: 0.8rem; color: var(--text-muted);" id="tableCountText">Showing all log sources</div>
+
+          <!-- Health Filter Pills -->
+          <div class="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10 text-xs font-mono">
+            <button class="px-2 py-1 rounded-lg transition" 
+                    :class="healthFilter === 'all' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-white'"
+                    @click="healthFilter = 'all'">All</button>
+            <button class="px-2 py-1 rounded-lg transition" 
+                    :class="healthFilter === 'optimal' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-slate-400 hover:text-white'"
+                    @click="healthFilter = 'optimal'">Optimal</button>
+            <button class="px-2 py-1 rounded-lg transition" 
+                    :class="healthFilter === 'degraded' ? 'bg-rose-500/20 text-rose-300 font-bold' : 'text-slate-400 hover:text-white'"
+                    @click="healthFilter = 'degraded'">Errors</button>
+          </div>
+
+          <!-- Export Buttons -->
+          <div class="flex items-center gap-1">
+            <button @click="exportCsv()" class="cyber-input py-1 px-2.5 text-xs text-slate-300 hover:text-white flex items-center gap-1 hover:border-cyan-500/50">
+              CSV
+            </button>
+            <button @click="exportJson()" class="cyber-input py-1 px-2.5 text-xs text-slate-300 hover:text-white flex items-center gap-1 hover:border-cyan-500/50">
+              JSON
+            </button>
+          </div>
         </div>
 
-        <div class="table-responsive">
-          <table id="sourcesTable">
-            <thead>
-              <tr>
-                <th>Log Type</th>
-                <th>Collector IDs</th>
-                <th style="text-align: right;">Volume (MB)</th>
-                <th style="text-align: right;">Volume (GB)</th>
-                <th style="text-align: right;">Raw Records</th>
-                <th style="text-align: right;">Normalized Events</th>
-                <th style="text-align: right;">Norm %</th>
-                <th style="text-align: right;">Avg Record Size</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="sourcesTableBody">
-              <tr>
-                <td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                  Loading ingestion sources...
+      </div>
+
+      <!-- TAB 1: Log Sources Explorer -->
+      <div x-show="activeTab === 'sources'" class="mt-4 overflow-x-auto">
+        <table class="w-full text-left text-xs font-mono">
+          <thead>
+            <tr class="border-b border-white/10 text-slate-400 uppercase tracking-wider text-[11px]">
+              <th class="py-3 px-4 cursor-pointer hover:text-white" @click="toggleSort('name')">
+                <div class="flex items-center gap-1">
+                  Log Type / Collector ID
+                  <span x-show="sortBy === 'name'" x-text="sortDesc ? '↓' : '↑'"></span>
+                </div>
+              </th>
+              <th class="py-3 px-4 text-right cursor-pointer hover:text-white" @click="toggleSort('volume')">
+                <div class="flex items-center justify-end gap-1">
+                  Volume (Bytes / GB)
+                  <span x-show="sortBy === 'volume'" x-text="sortDesc ? '↓' : '↑'"></span>
+                </div>
+              </th>
+              <th class="py-3 px-4 text-right cursor-pointer hover:text-white" @click="toggleSort('records')">
+                <div class="flex items-center justify-end gap-1">
+                  Raw Records
+                  <span x-show="sortBy === 'records'" x-text="sortDesc ? '↓' : '↑'"></span>
+                </div>
+              </th>
+              <th class="py-3 px-4 text-right cursor-pointer hover:text-white" @click="toggleSort('events')">
+                <div class="flex items-center justify-end gap-1">
+                  Normalized UDM
+                  <span x-show="sortBy === 'events'" x-text="sortDesc ? '↓' : '↑'"></span>
+                </div>
+              </th>
+              <th class="py-3 px-4 text-right cursor-pointer hover:text-white" @click="toggleSort('errors')">
+                <div class="flex items-center justify-end gap-1">
+                  Errors
+                  <span x-show="sortBy === 'errors'" x-text="sortDesc ? '↓' : '↑'"></span>
+                </div>
+              </th>
+              <th class="py-3 px-4 text-right cursor-pointer hover:text-white" @click="toggleSort('ratio')">
+                <div class="flex items-center justify-end gap-1">
+                  Efficiency
+                  <span x-show="sortBy === 'ratio'" x-text="sortDesc ? '↓' : '↑'"></span>
+                </div>
+              </th>
+              <th class="py-3 px-4 text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            <template x-for="item in filteredSources" :key="item.log_type">
+              <tr class="hover:bg-white/[0.03] transition-colors group">
+                <td class="py-3.5 px-4">
+                  <div class="font-semibold text-white group-hover:text-cyan-300 transition" x-text="item.log_type"></div>
+                  <div class="text-[10px] text-slate-500 truncate max-w-xs" x-text="item.collector_ids || 'Default Ingestion Stream'"></div>
+                </td>
+                <td class="py-3.5 px-4 text-right text-slate-200">
+                  <div class="font-semibold" x-text="formatBytes(item.bytes_count)"></div>
+                  <div class="text-[10px] text-slate-500" x-text="(item.bytes_count / 1e9).toFixed(3) + ' GB'"></div>
+                </td>
+                <td class="py-3.5 px-4 text-right text-slate-300" x-text="formatNumber(item.record_count)"></td>
+                <td class="py-3.5 px-4 text-right text-emerald-400 font-semibold" x-text="formatNumber(item.normalized_events)"></td>
+                <td class="py-3.5 px-4 text-right font-semibold"
+                    :class="item.error_events > 0 ? 'text-rose-400' : 'text-slate-500'" 
+                    x-text="formatNumber(item.error_events)"></td>
+                <td class="py-3.5 px-4 text-right">
+                  <span class="font-bold" 
+                        :class="{
+                          'text-emerald-400': item.ratio_pct >= 95,
+                          'text-amber-400': item.ratio_pct >= 80 && item.ratio_pct < 95,
+                          'text-rose-400': item.ratio_pct < 80
+                        }"
+                        x-text="item.ratio_pct.toFixed(1) + '%'"></span>
+                </td>
+                <td class="py-3.5 px-4 text-center">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold"
+                        :class="{
+                          'badge-glow-emerald': item.health === 'optimal',
+                          'badge-glow-amber': item.health === 'warning',
+                          'badge-glow-rose bg-rose-500/10 border border-rose-500/30 text-rose-300': item.health === 'degraded'
+                        }">
+                    <span class="w-1.5 h-1.5 rounded-full" 
+                          :class="{
+                            'bg-emerald-400': item.health === 'optimal',
+                            'bg-amber-400': item.health === 'warning',
+                            'bg-rose-400': item.health === 'degraded'
+                          }"></span>
+                    <span x-text="item.health.toUpperCase()"></span>
+                  </span>
                 </td>
               </tr>
-            </tbody>
-          </table>
-        </div>
+            </template>
+            <tr x-show="filteredSources.length === 0">
+              <td colspan="7" class="py-12 text-center text-slate-500 font-sans">
+                No log sources match your current filter or search criteria.
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-    </div>
 
-    <!-- Tab 2: 30m Rollup Reconciliation -->
-    <div class="tab-content" id="tabReconcile">
-      <div class="table-card">
-        <div class="table-toolbar">
+      <!-- TAB 2: 30m Rollup Reconciliation Matrix -->
+      <div x-show="activeTab === 'reconciliation'" class="mt-4 space-y-4">
+        <div class="p-4 rounded-xl bg-cyan-950/20 border border-cyan-500/20 text-xs text-slate-300 font-sans flex items-start gap-3">
+          <svg class="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
           <div>
-            <h4 style="color: #fff; font-size: 0.95rem; font-weight: 700;">Customer Rollup Reconciliation Audit</h4>
-            <p style="font-size: 0.78rem; color: var(--text-muted);">
-              Calculates sum of */30m dataset vs full rollup window, enforcing the max record for official tracking & billing.
-            </p>
+            <span class="font-bold text-white">Authoritative Reconciliation Algorithm:</span>
+            Google Cloud Monitoring aggregates ingestion telemetry in 30-minute metric windows as well as overall rolling points. 
+            The official record enforces <code class="text-cyan-300 font-mono font-bold">max(sum_30m, rollup)</code> to guarantee accurate volume accounting and audit fidelity.
           </div>
-          <button class="btn btn-secondary" id="btnRunReconcile">Re-run Reconciliation</button>
         </div>
-        <div class="table-responsive">
-          <table id="reconcileTable">
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs font-mono">
             <thead>
-              <tr>
-                <th>Log Type</th>
-                <th>Collector ID</th>
-                <th style="text-align: right;">30-Minute Sum</th>
-                <th style="text-align: right;">Rollup Window</th>
-                <th style="text-align: right;">Official Max</th>
-                <th style="text-align: right;">Variance</th>
-                <th>Winning Strategy</th>
+              <tr class="border-b border-white/10 text-slate-400 uppercase tracking-wider text-[11px]">
+                <th class="py-3 px-4">Log Type</th>
+                <th class="py-3 px-4 text-right">Sum of 30m Buckets</th>
+                <th class="py-3 px-4 text-right">Whole Window Rollup</th>
+                <th class="py-3 px-4 text-center">Audit Status</th>
+                <th class="py-3 px-4 text-right text-cyan-400 font-bold">Official Record (Max)</th>
               </tr>
             </thead>
-            <tbody id="reconcileTableBody">
-              <tr>
-                <td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                  Click "Re-run Reconciliation" to calculate 30m dataset sum vs rollup.
-                </td>
-              </tr>
+            <tbody class="divide-y divide-white/5">
+              <template x-for="row in reconcileRows" :key="row.log_type">
+                <tr class="hover:bg-white/[0.03] transition-colors">
+                  <td class="py-3 px-4 font-semibold text-white" x-text="row.log_type"></td>
+                  <td class="py-3 px-4 text-right text-slate-300" x-text="formatBytes(row.sum_30m_bytes)"></td>
+                  <td class="py-3 px-4 text-right text-slate-300" x-text="formatBytes(row.rollup_bytes)"></td>
+                  <td class="py-3 px-4 text-center">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold"
+                          :class="{
+                            'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30': row.status === 'EXACT_MATCH',
+                            'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30': row.status === '30M_DOMINATES',
+                            'bg-purple-500/10 text-purple-400 border border-purple-500/30': row.status === 'ROLLUP_DOMINATES'
+                          }"
+                          x-text="row.status"></span>
+                  </td>
+                  <td class="py-3 px-4 text-right font-bold text-cyan-300" x-text="formatBytes(row.official_bytes)"></td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
       </div>
-    </div>
 
-    <!-- Tab 3: BigQuery Datalake Schema -->
-    <!-- Tab 3: BigQuery Datalake Schema -->
-    <div class="tab-content" id="tabBigQuery">
-      <div class="table-card" style="margin-bottom: 1.5rem;">
-        <div class="table-toolbar">
+      <!-- TAB 3: BigQuery Datalake Schema Compatibility -->
+      <div x-show="activeTab === 'bigquery'" class="mt-4 space-y-4">
+        <div class="p-4 rounded-xl bg-purple-950/20 border border-purple-500/20 text-xs text-slate-300 font-sans flex items-start gap-3">
+          <svg class="w-5 h-5 text-purple-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
           <div>
-            <h4 style="color: #fff; font-size: 0.95rem; font-weight: 700;">
-              Historical Schema: chronicle-[REDACTED_PROJECT_ID].datalake.ingestion_metrics
-              <span class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 0.72rem; margin-left: 0.5rem;">Tenant Redacted</span>
-            </h4>
-            <p style="font-size: 0.78rem; color: var(--text-muted);">
-              Migrated May 2025 from BigQuery hosted tables to Cloud Monitoring API v3.
-            </p>
+            <span class="font-bold text-white">Legacy BigQuery Schema Emulation:</span>
+            Recreates the exact column layout of the retired <code class="text-purple-300 font-mono">chronicle-{project}.datalake.ingestion_metrics</code> table, including collector concatenation with <code class="text-purple-300 font-mono">:RQ:</code> delimiters.
           </div>
         </div>
-        <div class="table-responsive">
-          <table id="bqTable">
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs font-mono">
             <thead>
-              <tr>
-                <th>log_type</th>
-                <th>collector_ids (:RQ:)</th>
-                <th>input_types</th>
-                <th style="text-align: right;">size_mb</th>
-                <th style="text-align: right;">event_count</th>
-                <th style="text-align: right;">normalized_events</th>
-                <th style="text-align: right;">error_events</th>
-                <th>drop_reason_codes</th>
-                <th>health_status</th>
+              <tr class="border-b border-white/10 text-slate-400 uppercase tracking-wider text-[11px]">
+                <th class="py-3 px-4">log_type</th>
+                <th class="py-3 px-4">collector_ids</th>
+                <th class="py-3 px-4 text-right">size_mb</th>
+                <th class="py-3 px-4 text-right">size_gb</th>
+                <th class="py-3 px-4 text-right">event_count</th>
+                <th class="py-3 px-4 text-right">normalized_events</th>
+                <th class="py-3 px-4 text-right">error_events</th>
               </tr>
             </thead>
-            <tbody id="bqTableBody">
-              <tr>
-                <td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                  Loading BigQuery compatible view...
-                </td>
-              </tr>
+            <tbody class="divide-y divide-white/5">
+              <template x-for="b in bigqueryRows" :key="b.log_type">
+                <tr class="hover:bg-white/[0.03] transition-colors">
+                  <td class="py-3 px-4 font-semibold text-white" x-text="b.log_type"></td>
+                  <td class="py-3 px-4 text-slate-400 truncate max-w-xs" x-text="b.collector_ids"></td>
+                  <td class="py-3 px-4 text-right text-slate-300" x-text="b.size_mb.toFixed(2)"></td>
+                  <td class="py-3 px-4 text-right text-slate-300" x-text="b.size_gb.toFixed(3)"></td>
+                  <td class="py-3 px-4 text-right text-slate-300" x-text="formatNumber(b.event_count)"></td>
+                  <td class="py-3 px-4 text-right text-emerald-400" x-text="formatNumber(b.normalized_events)"></td>
+                  <td class="py-3 px-4 text-right font-semibold"
+                      :class="b.error_events > 0 ? 'text-rose-400' : 'text-slate-500'" 
+                      x-text="formatNumber(b.error_events)"></td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- SQL query reference -->
-      <div class="code-panel">
-        <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('bqQueryCode').innerText)">Copy Query</button>
-        <div style="color: var(--primary); font-weight: 700; margin-bottom: 0.5rem;">Legacy BigQuery Query (Historical Reference - Redacted):</div>
-        <pre id="bqQueryCode">SELECT log_type,
-    string_agg(DISTINCT collector_id, ':RQ:') as collector_ids, 
-    string_agg(DISTINCT input_type, ':RQ:') as input_types, 
-    string_agg(DISTINCT drop_reason_code, ':RQ:') as drop_reason_codes,
-    SUM(CASE WHEN component = 'Ingestion API' THEN log_volume /1000/1000 END) as size_mb,
-    SUM(CASE WHEN component = 'Normalizer' THEN event_count END) as event_count,
-    SUM(CASE WHEN component = 'Normalizer' AND state = 'validated' THEN event_count END) as normalized_events,
-    SUM(CASE WHEN component = 'Normalizer' AND state = 'failed_validation' THEN event_count WHEN component = 'Normalizer' AND state = 'failed_parsing' THEN log_count END) as error_events,
-    SUM(CASE WHEN component = 'Normalizer' AND state = 'failed_parsing' THEN log_count END) as parsing_error_events,
-    SUM(CASE WHEN component = 'Normalizer' AND state = 'failed_validation' THEN event_count END) as validation_error_events
-FROM `chronicle-[REDACTED_PROJECT_ID].datalake.ingestion_metrics`
-WHERE UNIX_SECONDS(TIMESTAMP (ingestion_metrics.start_time)) > @start_epoch 
-    AND UNIX_SECONDS(TIMESTAMP (ingestion_metrics.start_time)) < @end_epoch
-GROUP BY log_type
-ORDER BY size_mb DESC, event_count DESC;</pre>
-      </div>
-    </div>
-
-    <!-- Tab 4: API Query Editor & Inspector -->
-    <div class="tab-content" id="tabInspector">
-      <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-        <!-- Privacy Notice Banner -->
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: var(--radius-md); padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
-          <div style="display: flex; align-items: center; gap: 0.6rem;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-            </svg>
-            <span style="font-weight: 700; color: #34d399; font-size: 0.88rem;">Tenant Privacy Guard: ACTIVE</span>
-            <span style="color: var(--text-muted); font-size: 0.8rem;">All tenant project IDs, collector GUIDs, and internal instance identifiers are automatically redacted from API query previews.</span>
+      <!-- TAB 4: API Query Inspector -->
+      <div x-show="activeTab === 'inspector'" class="mt-4 space-y-4 font-mono text-xs">
+        <div class="p-4 rounded-xl bg-obsidian-900 border border-white/10 space-y-3">
+          <div class="flex items-center justify-between text-slate-400 pb-2 border-b border-white/5">
+            <span class="text-cyan-400 font-bold">Cloud Monitoring Query Descriptor</span>
+            <span class="text-[10px] text-slate-500 font-sans">Tenant Identifiers Redacted for Security</span>
           </div>
-          <span class="badge" style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 0.72rem;">STRICT REDACTION</span>
-        </div>
 
-        <!-- Interactive Query Builder -->
-        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.25rem;">
-          <div style="font-weight: 700; color: #fff; margin-bottom: 0.75rem; font-size: 0.95rem; display: flex; justify-content: space-between; align-items: center;">
-            <span>⚡ Interactive API Query Builder</span>
-            <span style="font-size: 0.75rem; color: var(--text-muted);">Cloud Monitoring API v3 (REST / cURL)</span>
+          <div class="space-y-1">
+            <span class="text-slate-500 text-[11px]">HTTP Request URI</span>
+            <pre class="p-3 rounded-lg bg-black/40 border border-white/5 text-cyan-300 overflow-x-auto">GET https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries?
+  filter=metric.type = "chronicle.googleapis.com/ingestion/log/bytes_count"
+  &aggregation.groupByFields=resource.labels.log_type, resource.labels.collector_id
+  &aggregation.crossSeriesReducer=REDUCE_NONE
+  &aggregation.perSeriesAligner=ALIGN_SUM
+  &aggregation.alignmentPeriod=1800s
+  &interval.startTime=2026-09-22T23:30:00Z
+  &interval.endTime=2026-09-23T23:30:00Z</pre>
           </div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
-            <div>
-              <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight: 600;">Metric Type</label>
-              <select id="editorMetricSelect" style="background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem; width: 100%; font-size: 0.8rem;">
-                <option value="chronicle.googleapis.com/ingestion/log/bytes_count">1. Raw Volume (bytes_count)</option>
-                <option value="chronicle.googleapis.com/ingestion/log/record_count">2. Raw Records (record_count)</option>
-                <option value="chronicle.googleapis.com/normalizer/event/record_count">3. Normalized Events (normalizer/event/record_count)</option>
-              </select>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-[11px]">
+            <div class="p-2.5 rounded bg-black/30 border border-white/5">
+              <span class="text-slate-500 block">Metric 1</span>
+              <span class="text-slate-200">ingestion/log/bytes_count</span>
             </div>
-            <div>
-              <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight: 600;">Alignment Period</label>
-              <select id="editorAlignmentSelect" style="background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem; width: 100%; font-size: 0.8rem;">
-                <option value="1800s">1800s (30m Rollup / Reconciliation)</option>
-                <option value="7200s">7200s (2 Hours - Weekly)</option>
-                <option value="21600s">21600s (6 Hours - Monthly)</option>
-                <option value="86400s">86400s (24 Hours - Yearly / 12 Months)</option>
-              </select>
+            <div class="p-2.5 rounded bg-black/30 border border-white/5">
+              <span class="text-slate-500 block">Metric 2</span>
+              <span class="text-slate-200">ingestion/log/record_count</span>
             </div>
-            <div>
-              <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight: 600;">Log Type Filter (Optional)</label>
-              <select id="editorLogTypeSelect" style="background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem; width: 100%; font-size: 0.8rem;">
-                <option value="">All Log Types (Unfiltered)</option>
-              </select>
+            <div class="p-2.5 rounded bg-black/30 border border-white/5">
+              <span class="text-slate-500 block">Metric 3</span>
+              <span class="text-slate-200">normalizer/event/record_count</span>
             </div>
           </div>
-
-          <div class="code-panel" style="margin-top: 0.75rem;">
-            <button class="copy-btn" id="btnCopyEditorCurl">Copy cURL</button>
-            <div style="color: #38bdf8; font-weight: 700; margin-bottom: 0.5rem;">Interactive Live Query (Redacted):</div>
-            <pre id="editorQueryOutput">Loading query generator...</pre>
-          </div>
-        </div>
-
-        <!-- Reference Pre-Configured Queries -->
-        <div class="code-panel">
-          <div style="color: #38bdf8; font-weight: 700; margin-bottom: 0.5rem;">
-            1. Raw Volume Metric: chronicle.googleapis.com/ingestion/log/bytes_count
-          </div>
-          <pre>GET https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries?
-filter=metric.type%20%3D%20%22chronicle.googleapis.com%2Fingestion%2Flog%2Fbytes_count%22
-&aggregation.groupByFields=resource.labels.log_type%2C%20resource.labels.collector_id
-&aggregation.perSeriesAligner=ALIGN_SUM
-&aggregation.crossSeriesReducer=REDUCE_NONE
-&aggregation.alignmentPeriod=1800s
-&orderBy=resource.labels.log_type
-&pageSize=10000</pre>
-        </div>
-
-        <div class="code-panel">
-          <div style="color: #a78bfa; font-weight: 700; margin-bottom: 0.5rem;">
-            2. Raw Records Metric: chronicle.googleapis.com/ingestion/log/record_count
-          </div>
-          <pre>GET https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries?
-filter=metric.type%20%3D%20%22chronicle.googleapis.com%2Fingestion%2Flog%2Frecord_count%22
-&aggregation.groupByFields=resource.labels.log_type%2C%20resource.labels.collector_id
-&aggregation.perSeriesAligner=ALIGN_SUM
-&aggregation.crossSeriesReducer=REDUCE_NONE
-&aggregation.alignmentPeriod=1800s
-&orderBy=resource.labels.log_type
-&pageSize=10000</pre>
-        </div>
-
-        <div class="code-panel">
-          <div style="color: #34d399; font-weight: 700; margin-bottom: 0.5rem;">
-            3. Normalized UDM Metric: chronicle.googleapis.com/normalizer/event/record_count
-          </div>
-          <pre>GET https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries?
-filter=metric.type%20%3D%20%22chronicle.googleapis.com%2Fnormalizer%2Fevent%2Frecord_count%22
-&aggregation.groupByFields=resource.labels.log_type%2C%20resource.labels.collector_id
-&aggregation.perSeriesAligner=ALIGN_SUM
-&aggregation.crossSeriesReducer=REDUCE_NONE
-&aggregation.alignmentPeriod=1800s
-&orderBy=resource.labels.log_type
-&pageSize=10000</pre>
         </div>
       </div>
-    </div>
 
-    <!-- Tab 5: Health & Alerts -->
-    <div class="tab-content" id="tabHealth">
-      <div id="healthAlertsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;">
-        <!-- Dynamic alert cards injected by JavaScript -->
-      </div>
-    </div>
+    </section>
+
   </main>
 
-  <!-- Settings Modal -->
-  <div class="modal-overlay" id="settingsModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3 class="modal-title">SecOps Monitoring Configuration</h3>
-        <button class="close-btn" id="btnCloseModal">&times;</button>
+  <!-- Settings Modal Dialog -->
+  <div x-cloak x-show="settingsModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="fixed inset-0 bg-black/70 backdrop-blur-md" @click="settingsModalOpen = false"></div>
+
+    <div class="relative w-full max-w-md p-6 rounded-2xl bento-card bg-obsidian-900 border border-white/10 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+          Dashboard Settings
+        </h3>
+        <button @click="settingsModalOpen = false" class="text-slate-400 hover:text-white">✕</button>
       </div>
 
-      <div class="form-group">
-        <label class="form-label" for="inputProjectId">GCP Project ID</label>
-        <input type="text" class="form-control" id="inputProjectId" value="{{ project_id }}">
-      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 font-mono mb-1.5">SecOps Project ID</label>
+          <input type="text" x-model="settingsForm.projectId" class="cyber-input w-full font-mono text-xs">
+          <span class="text-[11px] text-slate-500 mt-1 block">Project where Google SecOps exports Cloud Monitoring telemetry.</span>
+        </div>
 
-      <div class="form-group">
-        <label class="form-label" for="inputCredsPath">Service Account Credentials File (JSON)</label>
-        <input type="text" class="form-control" id="inputCredsPath" placeholder="~/.creds/secops-sa.json">
-        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
-          Leave blank to use Application Default Credentials (ADC) or active gcloud login.
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+          <div>
+            <div class="text-xs font-semibold text-white">Mock / Synthetic Demo Mode</div>
+            <div class="text-[11px] text-slate-400">Render sample data without GCP API calls</div>
+          </div>
+          <input type="checkbox" x-model="settingsForm.mockMode" class="w-4 h-4 rounded text-cyan-500 focus:ring-cyan-500 bg-obsidian-800 border-white/20">
         </div>
       </div>
 
-      <div class="form-group">
-        <div class="form-check">
-          <input type="checkbox" id="checkMockMode" {{ 'checked' if mock_mode else '' }}>
-          <label for="checkMockMode" style="font-size: 0.85rem; color: var(--text-main); cursor: pointer;">
-            Enable Synthetic / Demo Mode (simulates realistic SecOps feeds offline)
-          </label>
-        </div>
-      </div>
-
-      <div class="form-actions">
-        <button class="btn btn-secondary" id="btnCancelSettings">Cancel</button>
-        <button class="btn btn-primary" id="btnSaveSettings">Save & Apply</button>
+      <div class="pt-3 border-t border-white/10 flex items-center justify-end gap-2">
+        <button @click="settingsModalOpen = false" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white transition">Cancel</button>
+        <button @click="saveSettings()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/25 hover:brightness-110 transition">Save Changes</button>
       </div>
     </div>
   </div>
 
-  <footer>
-    <div>Google SecOps Cloud Monitoring Engine • Project: <strong id="footerProject">{{ project_id }}</strong></div>
-    <div>API Endpoint: <code>https://monitoring.googleapis.com/v3/projects/[REDACTED_PROJECT_ID]/timeSeries</code></div>
+  <!-- Footer -->
+  <footer class="mt-auto border-t border-white/5 bg-obsidian-900/50 backdrop-blur px-4 py-4 text-center text-xs text-slate-500 font-mono">
+    <span>Google SecOps Ingestion Intelligence</span> • 
+    <span>Authoritative max(sum_30m, rollup)</span> • 
+    <span class="text-cyan-400">Tailwind + Alpine.js Bento UI</span>
   </footer>
 
-  <script src="/static/js/dashboard.js"></script>
 </body>
 </html>

@@ -1,0 +1,337 @@
+/* ==============================================================================
+   SECOPS INGESTION INTELLIGENCE - CYBER BENTO DESIGN SYSTEM
+   Modern Glassmorphism, Ambient Aurora Mesh, Neon FinTech Aesthetics
+   ============================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, Menlo, monospace;
+
+  /* Deep Space & Obsidian Palette */
+  --obsidian-950: #05070c;
+  --obsidian-900: #080c14;
+  --obsidian-850: #0d1320;
+  --obsidian-800: #121a2d;
+  --obsidian-750: #17223b;
+  --obsidian-700: #1e2c4c;
+
+  /* Neon Cyber Accents */
+  --neon-cyan: #00f2fe;
+  --neon-cyan-glow: rgba(0, 242, 254, 0.25);
+  --neon-blue: #4facfe;
+  --neon-purple: #a855f7;
+  --neon-purple-glow: rgba(168, 85, 247, 0.25);
+  --neon-emerald: #10b981;
+  --neon-emerald-glow: rgba(16, 185, 129, 0.25);
+  --neon-amber: #f59e0b;
+  --neon-amber-glow: rgba(245, 158, 11, 0.25);
+  --neon-rose: #f43f5e;
+  --neon-rose-glow: rgba(244, 63, 94, 0.25);
+
+  /* Glassmorphism Specs */
+  --glass-bg: rgba(13, 19, 32, 0.65);
+  --glass-bg-hover: rgba(18, 26, 45, 0.8);
+  --glass-bg-active: rgba(23, 34, 59, 0.9);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(0, 242, 254, 0.3);
+  --glass-border-subtle: rgba(255, 255, 255, 0.04);
+}
+
+/* Global Reset & Base Typography */
+html, body {
+  font-family: var(--font-sans);
+  background-color: var(--obsidian-950);
+  color: #f1f5f9;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, kbd, samp, pre {
+  font-family: var(--font-mono);
+}
+
+/* Ambient Aurora Mesh Background */
+.aurora-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  background: 
+    radial-gradient(circle at 10% 15%, rgba(0, 242, 254, 0.07) 0%, transparent 45%),
+    radial-gradient(circle at 85% 20%, rgba(168, 85, 247, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 50% 85%, rgba(16, 185, 129, 0.05) 0%, transparent 55%),
+    radial-gradient(circle at 80% 80%, rgba(79, 172, 254, 0.05) 0%, transparent 40%);
+}
+
+.aurora-mesh {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+}
+
+/* Glassmorphic Bento Cards */
+.bento-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.bento-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  pointer-events: none;
+}
+
+.bento-card:hover {
+  background: var(--glass-bg-hover);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.65), 0 0 20px -5px rgba(0, 242, 254, 0.15);
+  transform: translateY(-2px);
+}
+
+.bento-hero {
+  background: linear-gradient(135deg, rgba(13, 19, 32, 0.85) 0%, rgba(20, 28, 48, 0.65) 100%);
+  border: 1px solid rgba(0, 242, 254, 0.25);
+  box-shadow: 0 12px 35px -10px rgba(0, 0, 0, 0.6), 0 0 25px -8px rgba(0, 242, 254, 0.2);
+}
+
+.bento-hero:hover {
+  border-color: rgba(0, 242, 254, 0.45);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.7), 0 0 35px -6px rgba(0, 242, 254, 0.3);
+}
+
+/* Neon Glow Accents */
+.glow-cyan {
+  text-shadow: 0 0 18px var(--neon-cyan-glow);
+}
+
+.glow-purple {
+  text-shadow: 0 0 18px var(--neon-purple-glow);
+}
+
+.glow-emerald {
+  text-shadow: 0 0 18px var(--neon-emerald-glow);
+}
+
+.badge-glow-cyan {
+  background: rgba(0, 242, 254, 0.1);
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  color: #38bdf8;
+  box-shadow: 0 0 12px -2px rgba(0, 242, 254, 0.25);
+}
+
+.badge-glow-emerald {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  box-shadow: 0 0 12px -2px rgba(16, 185, 129, 0.25);
+}
+
+.badge-glow-purple {
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: #c084fc;
+  box-shadow: 0 0 12px -2px rgba(168, 85, 247, 0.25);
+}
+
+.badge-glow-amber {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  box-shadow: 0 0 12px -2px rgba(245, 158, 11, 0.25);
+}
+
+/* Segmented Control / Pill Nav */
+.segmented-pill-container {
+  background: rgba(8, 12, 20, 0.85);
+  border: 1px solid var(--glass-border);
+  padding: 4px;
+  border-radius: 9999px;
+  display: inline-flex;
+  gap: 2px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.segmented-pill-btn {
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.segmented-pill-btn:hover {
+  color: #f8fafc;
+}
+
+.segmented-pill-btn.active {
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
+  border: 1px solid rgba(0, 242, 254, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 242, 254, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Tab Navigation */
+.bento-tab-btn {
+  padding: 10px 18px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bento-tab-btn:hover {
+  color: #f1f5f9;
+}
+
+.bento-tab-btn.active {
+  color: #38bdf8;
+  border-bottom: 2px solid #38bdf8;
+  text-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+}
+
+/* Custom Cyber Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(8, 12, 20, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 242, 254, 0.4);
+}
+
+/* Pulsing Indicator Dot */
+.pulse-emerald {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 0 rgba(16, 185, 129, 0.6);
+  animation: pulse-ring 2s infinite;
+}
+
+.pulse-amber {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #f59e0b;
+  box-shadow: 0 0 0 rgba(245, 158, 11, 0.6);
+  animation: pulse-ring-amber 2s infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes pulse-ring-amber {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+/* Modern Cyber Input Fields */
+.cyber-input {
+  background: rgba(13, 19, 32, 0.75);
+  border: 1px solid var(--glass-border);
+  color: #f8fafc;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.cyber-input:focus {
+  border-color: rgba(0, 242, 254, 0.5);
+  box-shadow: 0 0 15px -3px rgba(0, 242, 254, 0.25);
+}
+
+/* Shimmer Loading Skeleton */
+.skeleton-shimmer {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.03) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Circular Radial Progress Meter */
+.radial-progress-ring {
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+
+.radial-progress-bg {
+  stroke: rgba(255, 255, 255, 0.06);
+}
+
+.radial-progress-bar {
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
