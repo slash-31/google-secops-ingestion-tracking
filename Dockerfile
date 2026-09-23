@@ -12,20 +12,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code
+# Copy application source code and entrypoint
 COPY secops_ingestion/ ./secops_ingestion/
 COPY static/ ./static/
 COPY templates/ ./templates/
 COPY app.py .
 COPY secops_ingestion_cli.py .
+COPY docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh
 
-ENV PORT=5000 \
+ENV PORT=443 \
     PYTHONUNBUFFERED=1 \
-    MOCK_MODE=false
+    MOCK_MODE=false \
+    SSL_ENABLED=true
 
-EXPOSE 5000
+EXPOSE 443 5000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:${PORT}/api/status || exit 1
+  CMD curl -k -f https://localhost:${PORT}/api/status || curl -f http://localhost:${PORT}/api/status || exit 1
 
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --timeout 120 app:app"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

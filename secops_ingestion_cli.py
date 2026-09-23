@@ -74,8 +74,8 @@ def parse_args():
     parser.add_argument(
         "--port",
         type=int,
-        default=5000,
-        help="Port for the web dashboard server (default: 5000)",
+        default=None,
+        help="Port for the web dashboard server (default: 443 with --ssl, otherwise 5000)",
     )
     parser.add_argument(
         "--ssl",
@@ -184,12 +184,13 @@ def main():
             app.config["SSL_CERT_PATH"] = cert_p
             app.config["SSL_KEY_PATH"] = key_p
 
-        print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://localhost:{args.port} (Project: {args.project})")
+        target_port = args.port if args.port is not None else (443 if args.ssl else 5000)
+        print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://localhost:{target_port} (Project: {args.project})")
         if args.ssl:
             print(f"🔒 SSL/TLS Enabled (Cert: {cert_p}, Key: {key_p})")
         app.config["SECOPS_PROJECT_ID"] = args.project
         app.config["MOCK_MODE"] = args.mock
-        app.run(host="0.0.0.0", port=args.port, debug=False, ssl_context=ssl_context)
+        app.run(host="0.0.0.0", port=target_port, debug=False, ssl_context=ssl_context)
         return
 
     client = SecOpsMonitoringClient(

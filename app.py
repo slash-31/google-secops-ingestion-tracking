@@ -326,10 +326,12 @@ def api_export_json():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
     ssl_enabled = os.environ.get("SSL_ENABLED", "false").lower() in ("true", "1", "yes")
     cert_path = os.environ.get("SSL_CERT_PATH", "certs/cert.pem")
     key_path = os.environ.get("SSL_KEY_PATH", "certs/key.pem")
+
+    default_port = 443 if (ssl_enabled or (os.path.exists(cert_path) and os.path.exists(key_path) and os.environ.get("SSL_ENABLED") != "0")) else 5000
+    port = int(os.environ.get("PORT", default_port))
 
     ssl_context = None
     protocol = "http"

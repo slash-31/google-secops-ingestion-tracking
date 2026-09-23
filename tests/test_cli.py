@@ -15,7 +15,7 @@ class TestSecopsIngestionCLI(unittest.TestCase):
             args = secops_ingestion_cli.parse_args()
             self.assertEqual(args.project, "your-secops-project-id")
             self.assertEqual(args.timeframe, "all")
-            self.assertEqual(args.port, 5000)
+            self.assertIsNone(args.port)
             self.assertFalse(args.serve)
             self.assertFalse(args.mock)
             self.assertFalse(args.reconcile_30m)
@@ -154,6 +154,38 @@ class TestSecopsIngestionCLI(unittest.TestCase):
             mock_app.run.assert_called_once_with(
                 host="0.0.0.0",
                 port=8443,
+                debug=False,
+                ssl_context=fake_ssl_ctx,
+            )
+
+    @patch("builtins.print")
+    @patch("secops_ingestion.ssl_util.create_ssl_context")
+    @patch("secops_ingestion.ssl_util.ensure_ssl_credentials")
+    @patch("secops_ingestion_cli.parse_args")
+    def test_serve_with_ssl_default_port_443(self, mock_parse_args, mock_ensure_ssl, mock_create_ctx, mock_print):
+        mock_args = MagicMock()
+        mock_args.generate_cert = False
+        mock_args.serve = True
+        mock_args.ssl = True
+        mock_args.port = None  # User did not pass --port
+        mock_args.project = "test-project"
+        mock_args.mock = True
+        mock_args.ssl_cert = "certs/cert.pem"
+        mock_args.ssl_key = "certs/key.pem"
+        mock_parse_args.return_value = mock_args
+
+        mock_ensure_ssl.return_value = ("certs/cert.pem", "certs/key.pem")
+        fake_ssl_ctx = MagicMock()
+        mock_create_ctx.return_value = fake_ssl_ctx
+
+        mock_app = MagicMock()
+        mock_app.config = {}
+        with patch.dict(sys.modules, {"app": MagicMock(app=mock_app)}):
+            secops_ingestion_cli.main()
+            self.assertTrue(mock_app.config.get("SSL_ENABLED"))
+            mock_app.run.assert_called_once_with(
+                host="0.0.0.0",
+                port=443,
                 debug=False,
                 ssl_context=fake_ssl_ctx,
             )
