@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google SecOps Ingestion Intelligence | {{ project_id }}</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+  <script src="/static/js/chart.min.js"></script>
+</head>
+<body>
+  <!-- Top Navigation Header -->
+  <header class="top-header">
+    <div class="brand-wrapper">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="brand-title">Google SecOps Ingestion Intelligence</h1>
+        <div class="brand-subtitle">Cloud Monitoring Metrics Engine (v3 projects.timeSeries)</div>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <!-- Project Identifier Pill -->
+      <div class="badge badge-project" id="projectBadge" title="Active GCP Project">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+        </svg>
+        <span id="currentProjectText">{{ project_id }}</span>
+      </div>
+
+      <!-- Auth Mode Pill -->
+      <div class="badge {{ 'badge-mock' if mock_mode else 'badge-live' }}" id="modeBadge">
+        <span class="pulse-dot"></span>
+        <span id="modeText">{{ 'MOCK / DEMO' if mock_mode else 'GCP LIVE' }}</span>
+      </div>
+
+      <!-- Timeframe Nav Pills -->
+      <nav class="timeframe-nav" aria-label="Timeframe selector">
+        <button class="timeframe-btn active" data-period="daily">Daily (24h)</button>
+        <button class="timeframe-btn" data-period="weekly">Weekly (7d)</button>
+        <button class="timeframe-btn" data-period="monthly">Monthly (30d)</button>
+      </nav>
+
+      <!-- Action Buttons -->
+      <button class="btn btn-secondary" id="btnRefresh" title="Refresh metrics from Cloud Monitoring">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        Refresh
+      </button>
+
+      <button class="btn btn-secondary" id="btnSettings" title="Configure Project & Auth">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </button>
+
+      <div style="display:flex; gap:4px;">
+        <button class="btn btn-secondary" id="btnExportCsv" title="Export CSV">CSV</button>
+        <button class="btn btn-secondary" id="btnExportJson" title="Export JSON">JSON</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="dashboard-container">
+    <!-- Interval info banner -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+      <div>
+        <h2 style="font-size: 1.35rem; font-weight: 700; color: #fff;" id="viewTitle">Daily Ingestion Summary</h2>
+        <span style="font-size: 0.8rem; color: var(--text-muted);" id="viewIntervalText">Loading interval window...</span>
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-dim);" id="apiLatencyText">Cloud Monitoring API v3 Ready</div>
+    </div>
+
+    <!-- KPI Summary Grid -->
+    <section class="kpi-grid">
+      <!-- KPI 1: Ingestion Volume -->
+      <article class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Total Ingestion Volume</span>
+          <div class="kpi-icon-badge">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiVolume">0.00 GB</div>
+        <div class="kpi-meta">
+          <span id="kpiVolumeMb">0 MB</span> • <span id="kpiActiveLogTypes">0 Log Types</span>
+        </div>
+      </article>
+
+      <!-- KPI 2: Raw Records Ingested -->
+      <article class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Raw Ingested Records</span>
+          <div class="kpi-icon-badge">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="8" y1="6" x2="21" y2="6"/>
+              <line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/>
+              <line x1="3" y1="6" x2="3.01" y2="6"/>
+              <line x1="3" y1="12" x2="3.01" y2="12"/>
+              <line x1="3" y1="18" x2="3.01" y2="18"/>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiRecords">0</div>
+        <div class="kpi-meta">
+          <span>ingestion/log/record_count</span>
+        </div>
+      </article>
+
+      <!-- KPI 3: Normalized UDM Events -->
+      <article class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Normalized UDM Events</span>
+          <div class="kpi-icon-badge">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+              <polyline points="2 17 12 22 22 17"/>
+              <polyline points="2 12 12 17 22 12"/>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiEvents">0</div>
+        <div class="kpi-meta">
+          <span>normalizer/event/record_count</span>
+        </div>
+      </article>
+
+      <!-- KPI 4: Normalization Efficiency Ratio -->
+      <article class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Normalization Success</span>
+          <div class="kpi-icon-badge">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiNormRatio">0.0%</div>
+        <div class="kpi-meta">
+          <span id="kpiHealthBreakdown">0 Healthy • 0 Warning • 0 Critical</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="normProgressBar" style="width: 0%;"></div>
+        </div>
+      </article>
+    </section>
+
+    <!-- Analytics Charts Grid -->
+    <section class="charts-grid">
+      <!-- Volume Trend Chart -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <h3 class="chart-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            Ingestion Volume Trend (MB)
+          </h3>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">chronicle.googleapis.com/ingestion/log/bytes_count</span>
+        </div>
+        <div class="chart-canvas-wrapper">
+          <canvas id="volumeTrendChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Share by Log Type Chart -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <h3 class="chart-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z"/>
+            </svg>
+            Ingestion Volume by Log Type
+          </h3>
+        </div>
+        <div class="chart-canvas-wrapper">
+          <canvas id="logTypeDonutChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Deep Dive Tabs -->
+    <nav class="tab-navigation">
+      <button class="tab-btn active" data-tab="tabBreakdown">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="9" y1="21" x2="9" y2="9"/>
+        </svg>
+        Log Sources Breakdown
+      </button>
+
+      <button class="tab-btn" data-tab="tabReconcile">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 14 14"/>
+        </svg>
+        30m Rollup Reconciliation
+      </button>
+
+      <button class="tab-btn" data-tab="tabBigQuery">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/>
+          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+        </svg>
+        BigQuery Datalake Schema
+      </button>
+
+      <button class="tab-btn" data-tab="tabInspector">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="16 18 22 12 16 6"/>
+          <polyline points="8 6 2 12 8 18"/>
+        </svg>
+        API Query Inspector
+      </button>
+
+      <button class="tab-btn" data-tab="tabHealth">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        Ingestion Health & Alerts
+      </button>
+    </nav>
+
+    <!-- Tab 1: Breakdown Table -->
+    <div class="tab-content active" id="tabBreakdown">
+      <div class="table-card">
+        <div class="table-toolbar">
+          <div class="search-input-wrapper">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input type="text" class="search-input" id="searchTable" placeholder="Filter log types or collectors...">
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);" id="tableCountText">Showing all log sources</div>
+        </div>
+
+        <div class="table-responsive">
+          <table id="sourcesTable">
+            <thead>
+              <tr>
+                <th>Log Type</th>
+                <th>Collector IDs</th>
+                <th style="text-align: right;">Volume (MB)</th>
+                <th style="text-align: right;">Volume (GB)</th>
+                <th style="text-align: right;">Raw Records</th>
+                <th style="text-align: right;">Normalized Events</th>
+                <th style="text-align: right;">Norm %</th>
+                <th style="text-align: right;">Avg Record Size</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="sourcesTableBody">
+              <tr>
+                <td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                  Loading ingestion sources...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: 30m Rollup Reconciliation -->
+    <div class="tab-content" id="tabReconcile">
+      <div class="table-card">
+        <div class="table-toolbar">
+          <div>
+            <h4 style="color: #fff; font-size: 0.95rem; font-weight: 700;">Customer Rollup Reconciliation Audit</h4>
+            <p style="font-size: 0.78rem; color: var(--text-muted);">
+              Calculates sum of */30m dataset vs full rollup window, enforcing the max record for official tracking & billing.
+            </p>
+          </div>
+          <button class="btn btn-secondary" id="btnRunReconcile">Re-run Reconciliation</button>
+        </div>
+        <div class="table-responsive">
+          <table id="reconcileTable">
+            <thead>
+              <tr>
+                <th>Log Type</th>
+                <th>Collector ID</th>
+                <th style="text-align: right;">30-Minute Sum</th>
+                <th style="text-align: right;">Rollup Window</th>
+                <th style="text-align: right;">Official Max</th>
+                <th style="text-align: right;">Variance</th>
+                <th>Winning Strategy</th>
+              </tr>
+            </thead>
+            <tbody id="reconcileTableBody">
+              <tr>
+                <td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                  Click "Re-run Reconciliation" to calculate 30m dataset sum vs rollup.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: BigQuery Datalake Schema -->
+    <div class="tab-content" id="tabBigQuery">
+      <div class="table-card" style="margin-bottom: 1.5rem;">
+        <div class="table-toolbar">
+          <div>
+            <h4 style="color: #fff; font-size: 0.95rem; font-weight: 700;">
+              Historical Schema: chronicle-{{ project_id }}.datalake.ingestion_metrics
+            </h4>
+            <p style="font-size: 0.78rem; color: var(--text-muted);">
+              Migrated May 2025 from BigQuery hosted tables to Cloud Monitoring API v3.
+            </p>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table id="bqTable">
+            <thead>
+              <tr>
+                <th>log_type</th>
+                <th>collector_ids (:RQ:)</th>
+                <th>input_types</th>
+                <th style="text-align: right;">size_mb</th>
+                <th style="text-align: right;">event_count</th>
+                <th style="text-align: right;">normalized_events</th>
+                <th style="text-align: right;">error_events</th>
+                <th>drop_reason_codes</th>
+                <th>health_status</th>
+              </tr>
+            </thead>
+            <tbody id="bqTableBody">
+              <tr>
+                <td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                  Loading BigQuery compatible view...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SQL query reference -->
+      <div class="code-panel">
+        <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('bqQueryCode').innerText)">Copy Query</button>
+        <div style="color: var(--primary); font-weight: 700; margin-bottom: 0.5rem;">Legacy BigQuery Query (Historical Reference):</div>
+        <pre id="bqQueryCode">SELECT log_type,
+    string_agg(DISTINCT collector_id, ':RQ:') as collector_ids, 
+    string_agg(DISTINCT input_type, ':RQ:') as input_types, 
+    string_agg(DISTINCT drop_reason_code, ':RQ:') as drop_reason_codes,
+    SUM(CASE WHEN component = 'Ingestion API' THEN log_volume /1000/1000 END) as size_mb,
+    SUM(CASE WHEN component = 'Normalizer' THEN event_count END) as event_count,
+    SUM(CASE WHEN component = 'Normalizer' AND state = 'validated' THEN event_count END) as normalized_events,
+    SUM(CASE WHEN component = 'Normalizer' AND state = 'failed_validation' THEN event_count WHEN component = 'Normalizer' AND state = 'failed_parsing' THEN log_count END) as error_events,
+    SUM(CASE WHEN component = 'Normalizer' AND state = 'failed_parsing' THEN log_count END) as parsing_error_events,
+    SUM(CASE WHEN component = 'Normalizer' AND state = 'failed_validation' THEN event_count END) as validation_error_events
+FROM `chronicle-{{ project_id }}.datalake.ingestion_metrics`
+WHERE UNIX_SECONDS(TIMESTAMP (ingestion_metrics.start_time)) > @start_epoch 
+    AND UNIX_SECONDS(TIMESTAMP (ingestion_metrics.start_time)) < @end_epoch
+GROUP BY log_type
+ORDER BY size_mb DESC, event_count DESC;</pre>
+      </div>
+    </div>
+
+    <!-- Tab 4: API Query Inspector -->
+    <div class="tab-content" id="tabInspector">
+      <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+        <div class="code-panel">
+          <div style="color: #38bdf8; font-weight: 700; margin-bottom: 0.5rem;">
+            1. Raw Volume Metric: chronicle.googleapis.com/ingestion/log/bytes_count
+          </div>
+          <pre>GET https://monitoring.googleapis.com/v3/projects/{{ project_id }}/timeSeries?
+filter=metric.type%20%3D%20%22chronicle.googleapis.com%2Fingestion%2Flog%2Fbytes_count%22
+&aggregation.groupByFields=resource.labels.log_type%2C%20resource.labels.collector_id
+&aggregation.perSeriesAligner=ALIGN_SUM
+&aggregation.crossSeriesReducer=REDUCE_NONE
+&aggregation.alignmentPeriod=1800s
+&orderBy=resource.labels.log_type
+&pageSize=10000</pre>
+        </div>
+
+        <div class="code-panel">
+          <div style="color: #a78bfa; font-weight: 700; margin-bottom: 0.5rem;">
+            2. Raw Records Metric: chronicle.googleapis.com/ingestion/log/record_count
+          </div>
+          <pre>GET https://monitoring.googleapis.com/v3/projects/{{ project_id }}/timeSeries?
+filter=metric.type%20%3D%20%22chronicle.googleapis.com%2Fingestion%2Flog%2Frecord_count%22
+&aggregation.groupByFields=resource.labels.log_type%2C%20resource.labels.collector_id
+&aggregation.perSeriesAligner=ALIGN_SUM
+&aggregation.crossSeriesReducer=REDUCE_NONE
+&aggregation.alignmentPeriod=1800s
+&orderBy=resource.labels.log_type
+&pageSize=10000</pre>
+        </div>
+
+        <div class="code-panel">
+          <div style="color: #34d399; font-weight: 700; margin-bottom: 0.5rem;">
+            3. Normalized UDM Metric: chronicle.googleapis.com/normalizer/event/record_count
+          </div>
+          <pre>GET https://monitoring.googleapis.com/v3/projects/{{ project_id }}/timeSeries?
+filter=metric.type%20%3D%20%22chronicle.googleapis.com%2Fnormalizer%2Fevent%2Frecord_count%22
+&aggregation.groupByFields=resource.labels.log_type%2C%20resource.labels.collector_id
+&aggregation.perSeriesAligner=ALIGN_SUM
+&aggregation.crossSeriesReducer=REDUCE_NONE
+&aggregation.alignmentPeriod=1800s
+&orderBy=resource.labels.log_type
+&pageSize=10000</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 5: Health & Alerts -->
+    <div class="tab-content" id="tabHealth">
+      <div id="healthAlertsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;">
+        <!-- Dynamic alert cards injected by JavaScript -->
+      </div>
+    </div>
+  </main>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">SecOps Monitoring Configuration</h3>
+        <button class="close-btn" id="btnCloseModal">&times;</button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="inputProjectId">GCP Project ID</label>
+        <input type="text" class="form-control" id="inputProjectId" value="{{ project_id }}">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="inputCredsPath">Service Account Credentials File (JSON)</label>
+        <input type="text" class="form-control" id="inputCredsPath" placeholder="~/.creds/weirdsecops-ing.json">
+        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+          Leave blank to use Application Default Credentials (ADC) or active gcloud login.
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div class="form-check">
+          <input type="checkbox" id="checkMockMode" {{ 'checked' if mock_mode else '' }}>
+          <label for="checkMockMode" style="font-size: 0.85rem; color: var(--text-main); cursor: pointer;">
+            Enable Synthetic / Demo Mode (simulates realistic SecOps feeds offline)
+          </label>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-secondary" id="btnCancelSettings">Cancel</button>
+        <button class="btn btn-primary" id="btnSaveSettings">Save & Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div>Google SecOps Cloud Monitoring Engine • Project: <strong id="footerProject">{{ project_id }}</strong></div>
+    <div>API Endpoint: <code>https://monitoring.googleapis.com/v3/projects/{{ project_id }}/timeSeries</code></div>
+  </footer>
+
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
