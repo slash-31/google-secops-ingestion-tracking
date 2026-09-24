@@ -1,3 +1,17 @@
+// --- XSS guard -------------------------------------------------------------
+// Values below originate from Cloud Monitoring resource labels (log_type,
+// collector_id). Those labels are operator-supplied upstream, so they are
+// untrusted here and must never reach innerHTML unescaped.
+function esc(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * Google SecOps Ingestion Intelligence Dashboard
  * Dynamic Charting, Table Filtering, Reconciliation, and API integration.
@@ -394,12 +408,12 @@ function renderSourcesTable(sources) {
     else if (src.health_status.includes('FAIL') || src.health_status.includes('CRITICAL')) statusClass = 'status-critical';
 
     const collectorsHtml = (src.collectors && src.collectors.length > 0)
-      ? src.collectors.map(c => `<span class="collector-pill" title="Collector ID">${c}</span>`).join('')
+      ? src.collectors.map(c => `<span class="collector-pill" title="Collector ID">${esc(c)}</span>`).join('')
       : '<span style="color:var(--text-dim); font-size:0.75rem;">direct / gcp feed</span>';
 
     tr.innerHTML = `
       <td>
-        <span class="log-type-tag">${src.log_type}</span>
+        <span class="log-type-tag">${esc(src.log_type)}</span>
       </td>
       <td>${collectorsHtml}</td>
       <td style="text-align: right; font-weight: 600;">${src.size_mb.toLocaleString()}</td>
@@ -407,10 +421,10 @@ function renderSourcesTable(sources) {
       <td style="text-align: right;">${formatNumber(src.record_count)}</td>
       <td style="text-align: right; color: #34d399;">${formatNumber(src.normalized_event_count)}</td>
       <td style="text-align: right; font-weight: 700;">${src.normalization_rate_pct.toFixed(1)}%</td>
-      <td style="text-align: right; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">${src.avg_bytes_per_record} B</td>
+      <td style="text-align: right; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">${esc(src.avg_bytes_per_record)} B</td>
       <td>
         <span class="status-indicator ${statusClass}">
-          ${src.health_status}
+          ${esc(src.health_status)}
         </span>
       </td>
     `;
@@ -454,8 +468,8 @@ function renderHealthCards(sources) {
 
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-        <span class="log-type-tag">${src.log_type}</span>
-        <span class="status-indicator ${src.health_color === 'red' ? 'status-critical' : 'status-degraded'}">${src.health_status}</span>
+        <span class="log-type-tag">${esc(src.log_type)}</span>
+        <span class="status-indicator ${src.health_color === 'red' ? 'status-critical' : 'status-degraded'}">${esc(src.health_status)}</span>
       </div>
       <div style="font-size: 0.85rem; color: #fff; margin-bottom: 0.5rem;">
         Efficiency: <strong>${src.normalization_rate_pct}%</strong> (${formatNumber(src.normalized_event_count)} / ${formatNumber(src.record_count)} records)
@@ -489,19 +503,19 @@ async function loadReconciliationData() {
       const winnerClass = isSumWinner ? 'winner-sum' : 'winner-rollup';
 
       tr.innerHTML = `
-        <td><span class="log-type-tag">${r.log_type}</span></td>
-        <td><span class="collector-pill">${r.collector_id}</span></td>
+        <td><span class="log-type-tag">${esc(r.log_type)}</span></td>
+        <td><span class="collector-pill">${esc(r.collector_id)}</span></td>
         <td style="text-align: right; font-family: var(--font-mono);">${formatBytes(r.sum_30m)}</td>
         <td style="text-align: right; font-family: var(--font-mono);">${formatBytes(r.rollup)}</td>
         <td style="text-align: right; font-family: var(--font-mono); font-weight: 700; color: #60a5fa;">${formatBytes(r.official_max)}</td>
         <td style="text-align: right; font-size: 0.8rem; color: ${r.variance >= 0 ? '#34d399' : '#f87171'};">${r.variance_pct > 0 ? '+' : ''}${r.variance_pct}%</td>
-        <td><span class="winner-pill ${winnerClass}">${r.winner}</span></td>
+        <td><span class="winner-pill ${winnerClass}">${esc(r.winner)}</span></td>
       `;
       tbody.appendChild(tr);
     });
   } catch (err) {
     console.error('Error fetching reconciliation:', err);
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: #ef4444;">Failed to execute reconciliation audit: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: #ef4444;">Failed to execute reconciliation audit: ${esc(err.message)}</td></tr>`;
   }
 }
 
@@ -523,21 +537,21 @@ async function loadBigQueryData() {
     rows.forEach(r => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td><span class="log-type-tag">${r.log_type}</span></td>
-        <td style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">${r.collector_ids}</td>
-        <td style="font-size: 0.75rem;">${r.input_types}</td>
+        <td><span class="log-type-tag">${esc(r.log_type)}</span></td>
+        <td style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">${esc(r.collector_ids)}</td>
+        <td style="font-size: 0.75rem;">${esc(r.input_types)}</td>
         <td style="text-align: right; font-weight: 600;">${r.size_mb.toLocaleString()}</td>
         <td style="text-align: right;">${formatNumber(r.event_count)}</td>
         <td style="text-align: right; color: #34d399;">${formatNumber(r.normalized_events)}</td>
         <td style="text-align: right; color: ${r.error_events > 0 ? '#ef4444' : 'var(--text-dim)'};">${formatNumber(r.error_events)}</td>
-        <td style="font-size: 0.75rem; color: var(--text-dim);">${r.drop_reason_codes}</td>
-        <td><span class="status-indicator ${r.health_status === 'HEALTHY' ? 'status-healthy' : 'status-degraded'}">${r.health_status}</span></td>
+        <td style="font-size: 0.75rem; color: var(--text-dim);">${esc(r.drop_reason_codes)}</td>
+        <td><span class="status-indicator ${r.health_status === 'HEALTHY' ? 'status-healthy' : 'status-degraded'}">${esc(r.health_status)}</span></td>
       `;
       tbody.appendChild(tr);
     });
   } catch (err) {
     console.error('Error fetching BigQuery format:', err);
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: #ef4444;">Failed loading BigQuery view: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: #ef4444;">Failed loading BigQuery view: ${esc(err.message)}</td></tr>`;
   }
 }
 

@@ -1,5 +1,7 @@
-cryptography>=41.0.0
-flask>=3.0.0
-google-auth>=2.20.0
-requests>=2.31.0
-gunicorn>=21.2.0
+# Pinned for reproducible builds. Refresh deliberately, not implicitly.
+# Author: Joshua Koch | Last Updated: 2026-09-23
+cryptography==43.0.1
+flask==3.0.3
+google-auth==2.35.0
+requests==2.32.3
+gunicorn==23.0.0

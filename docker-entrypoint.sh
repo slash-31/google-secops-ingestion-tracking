@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-PORT="${PORT:-443}"
+PORT="${PORT:-8443}"
 
 # Determine whether SSL should be enabled
 IS_SSL="false"

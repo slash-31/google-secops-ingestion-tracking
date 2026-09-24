@@ -19,8 +19,18 @@ from secops_ingestion.config import (
     METRIC_NORMALIZER_EVENT_COUNT,
     PERIOD_CONFIGS,
 )
-from secops_ingestion.client import SecOpsMonitoringClient
+from secops_ingestion.client import SecOpsMonitoringClient, MonitoringAuthError
 from secops_ingestion.calculator import IngestionCalculator
+from secops_ingestion.security import (
+    apply_security_headers,
+    require_secret,
+    rate_limit,
+    RateLimiter,
+    validate_project_id,
+    redact_project_id,
+    safe_filename_component,
+    csv_safe,
+)
 
 app = Flask(__name__)
 app.config["SECOPS_PROJECT_ID"] = os.environ.get("SECOPS_PROJECT_ID", DEFAULT_PROJECT_ID)
@@ -29,9 +39,31 @@ app.config["CREDENTIALS_PATH"] = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"
 app.config["SSL_ENABLED"] = os.environ.get("SSL_ENABLED", "false").lower() in ("true", "1", "yes")
 app.config["SSL_CERT_PATH"] = os.environ.get("SSL_CERT_PATH", "certs/cert.pem")
 app.config["SSL_KEY_PATH"] = os.environ.get("SSL_KEY_PATH", "certs/key.pem")
+# Opt-in only. When false, a Cloud Monitoring outage surfaces as an error rather
+# than as synthetic metrics presented as live telemetry.
+app.config["ALLOW_MOCK_FALLBACK"] = os.environ.get(
+    "ALLOW_MOCK_FALLBACK", "false"
+).lower() in ("true", "1", "yes")
+
+app.after_request(apply_security_headers)
+
+# Cloud Monitoring queries are the expensive path; keep a per-worker ceiling.
+_collect_limiter = RateLimiter(limit=6, window_seconds=300)
+_query_limiter = RateLimiter(limit=120, window_seconds=60)
 
 # In-memory cache for fast UI interaction
 _cache: Dict[str, Any] = {}
+
+
+def resolve_period(raw: str) -> str:
+    """
+    Map caller input to a known period key, defaulting to 'daily'.
+
+    Keeps unvalidated query-string data out of Content-Disposition headers and
+    out of cache keys.
+    """
+    candidate = (raw or "").strip().lower()
+    return candidate if candidate in PERIOD_CONFIGS else "daily"
 
 
 def get_client() -> SecOpsMonitoringClient:
@@ -40,6 +72,7 @@ def get_client() -> SecOpsMonitoringClient:
         project_id=app.config["SECOPS_PROJECT_ID"],
         credentials_path=app.config.get("CREDENTIALS_PATH"),
         mock_mode=app.config.get("MOCK_MODE", False),
+        allow_mock_fallback=app.config.get("ALLOW_MOCK_FALLBACK", False),
     )
 
 
@@ -81,6 +114,25 @@ def fetch_period_summary(period_key: str, force_reload: bool = False):
     return summary
 
 
+@app.errorhandler(MonitoringAuthError)
+def handle_monitoring_auth_error(exc):
+    """Surface telemetry unavailability explicitly instead of faking healthy data."""
+    app.logger.error("Cloud Monitoring unavailable: %s", exc)
+    return jsonify({
+        "error": "Telemetry unavailable",
+        "detail": "Cloud Monitoring could not be queried. Metrics are NOT being "
+                  "displayed because substituting synthetic data would be misleading.",
+        "data_source": "unavailable",
+    }), 503
+
+
+@app.errorhandler(500)
+def handle_internal_error(exc):
+    """Generic 500 body so internals are never disclosed to a public caller."""
+    app.logger.exception("Unhandled server error")
+    return jsonify({"error": "Internal server error"}), 500
+
+
 @app.route("/")
 def index():
     """Main dashboard page."""
@@ -98,42 +150,75 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    """Returns current project, auth mode, and connection details."""
+    """Returns connection health. Unauthenticated, so the payload is redacted."""
     client = get_client()
-    status = client.get_auth_status()
-    status["cached_entries"] = len(_cache)
-    status["ssl"] = bool(request.is_secure or app.config.get("SSL_ENABLED", False))
+    raw = client.get_auth_status()
+
+    status = {
+        "authenticated": raw.get("authenticated", False),
+        "mode": raw.get("mode", "live"),
+        "project_id": redact_project_id(raw.get("project_id")),
+        "credentials_source": raw.get("credentials_source", "Application Default Credentials"),
+        "message": raw.get("message", ""),
+        "cached_entries": len(_cache),
+        "ssl": bool(request.is_secure or app.config.get("SSL_ENABLED", False)),
+    }
+
     cert_path = app.config.get("SSL_CERT_PATH")
     if cert_path and os.path.exists(cert_path):
         try:
             from secops_ingestion.ssl_util import get_certificate_info
-            status["ssl_certificate"] = get_certificate_info(cert_path)
-        except Exception:
-            pass
+            cert = get_certificate_info(cert_path)
+            # Expose only what a health check needs; no container paths, no SANs.
+            status["ssl_certificate"] = {
+                "subject_cn": cert.get("subject_cn"),
+                "valid_until": cert.get("valid_until"),
+                "days_remaining": cert.get("days_remaining"),
+                "expired": cert.get("days_remaining", 0) <= 0,
+            }
+        except Exception as exc:
+            app.logger.warning("Certificate inspection failed: %s", exc)
     return jsonify(status)
 
 
 @app.route("/api/settings", methods=["POST"])
+@require_secret("ADMIN_SECRET")
 def api_settings():
-    """Updates settings like project_id, mock_mode, or credentials."""
-    data = request.json or {}
-    if "project_id" in data and data["project_id"].strip():
-        app.config["SECOPS_PROJECT_ID"] = data["project_id"].strip()
+    """Updates project_id or mock_mode. Admin-gated: this mutates runtime state."""
+    data = request.get_json(silent=True) or {}
+
+    if "project_id" in data:
+        if not isinstance(data["project_id"], str):
+            return jsonify({"error": "project_id must be a string"}), 400
+        try:
+            app.config["SECOPS_PROJECT_ID"] = validate_project_id(data["project_id"])
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
     if "mock_mode" in data:
-        app.config["MOCK_MODE"] = bool(data["mock_mode"])
+        if not isinstance(data["mock_mode"], bool):
+            return jsonify({"error": "mock_mode must be a boolean"}), 400
+        app.config["MOCK_MODE"] = data["mock_mode"]
+
+    # credentials_path is deliberately no longer settable over HTTP. Accepting a
+    # caller-supplied path turned this endpoint into a filesystem probe, and
+    # credentials belong in immutable environment configuration.
     if "credentials_path" in data:
-        app.config["CREDENTIALS_PATH"] = data["credentials_path"].strip() or None
+        return jsonify({
+            "error": "credentials_path is not configurable at runtime",
+            "detail": "Set GOOGLE_APPLICATION_CREDENTIALS in the environment instead.",
+        }), 400
 
     _cache.clear()
     return jsonify({
         "success": True,
-        "project_id": app.config["SECOPS_PROJECT_ID"],
+        "project_id": redact_project_id(app.config["SECOPS_PROJECT_ID"]),
         "mock_mode": app.config["MOCK_MODE"],
-        "credentials_path": app.config["CREDENTIALS_PATH"],
     })
 
 
 @app.route("/api/refresh", methods=["POST"])
+@require_secret("ADMIN_SECRET")
 def api_refresh():
     """Clears cached metrics and forces reload."""
     _cache.clear()
@@ -141,9 +226,10 @@ def api_refresh():
 
 
 @app.route("/api/ingestion/summary")
+@rate_limit(_query_limiter)
 def api_summary():
     """Returns overall ingestion summary for selected timeframe."""
-    period = request.args.get("period", "daily").lower()
+    period = resolve_period(request.args.get("period", "daily"))
     summary = fetch_period_summary(period)
 
     return jsonify({
@@ -164,9 +250,10 @@ def api_summary():
 
 
 @app.route("/api/ingestion/breakdown")
+@rate_limit(_query_limiter)
 def api_breakdown():
     """Returns log sources breakdown list."""
-    period = request.args.get("period", "daily").lower()
+    period = resolve_period(request.args.get("period", "daily"))
     summary = fetch_period_summary(period)
 
     items = []
@@ -195,9 +282,10 @@ def api_breakdown():
 
 
 @app.route("/api/ingestion/timeseries")
+@rate_limit(_query_limiter)
 def api_timeseries():
     """Returns chronological data points for Chart.js visualization."""
-    period = request.args.get("period", "daily").lower()
+    period = resolve_period(request.args.get("period", "daily"))
     summary = fetch_period_summary(period)
     return jsonify({
         "period": summary.period_name,
@@ -206,10 +294,11 @@ def api_timeseries():
 
 
 @app.route("/api/ingestion/reconcile")
+@rate_limit(_query_limiter)
 def api_reconcile():
     """Runs customer 30-minute sum vs rollup window reconciliation check."""
     client = get_client()
-    period = request.args.get("period", "daily").lower()
+    period = resolve_period(request.args.get("period", "daily"))
     days = PERIOD_CONFIGS.get(period, (1, ROLLUP_30M_SECONDS, "Daily"))[0]
     now = datetime.now(timezone.utc)
     start_time = now - timedelta(days=days)
@@ -229,9 +318,10 @@ def api_reconcile():
 
 
 @app.route("/api/ingestion/bigquery-compat")
+@rate_limit(_query_limiter)
 def api_bigquery_compat():
     """Returns data formatted according to the legacy BigQuery datalake.ingestion_metrics schema."""
-    period = request.args.get("period", "daily").lower()
+    period = resolve_period(request.args.get("period", "daily"))
     summary = fetch_period_summary(period)
     bq_rows = IngestionCalculator.to_bigquery_compat_table(summary)
     return jsonify({
@@ -242,16 +332,13 @@ def api_bigquery_compat():
     })
 
 
-@app.route("/api/collect", methods=["GET", "POST"])
+# POST-only: as a GET this was triggerable by any crawler or link-preview bot,
+# each hit costing four synchronous Cloud Monitoring queries.
+@app.route("/api/collect", methods=["POST"])
+@require_secret("CRON_SECRET", header_names=("X-Cron-Token",))
+@rate_limit(_collect_limiter)
 def api_collect():
     """Automated data collection endpoint triggered by Cloud Scheduler or cron."""
-    cron_secret = os.environ.get("CRON_SECRET")
-    if cron_secret:
-        auth_header = request.headers.get("Authorization", "")
-        token = request.headers.get("X-Cron-Token", "")
-        if token != cron_secret and auth_header != f"Bearer {cron_secret}":
-            return jsonify({"error": "Unauthorized"}), 401
-
     results = {}
     for period_key in ["daily", "weekly", "monthly", "yearly"]:
         summary = fetch_period_summary(period_key, force_reload=True)
@@ -275,9 +362,10 @@ def api_collect():
 
 
 @app.route("/api/export/csv")
+@rate_limit(_query_limiter)
 def api_export_csv():
     """Generates and downloads CSV of the active summary."""
-    period = request.args.get("period", "daily").lower()
+    period = resolve_period(request.args.get("period", "daily"))
     summary = fetch_period_summary(period)
 
     output = io.StringIO()
@@ -297,8 +385,8 @@ def api_export_csv():
     writer.writeheader()
     for src in summary.log_types:
         writer.writerow({
-            "log_type": src.log_type,
-            "collector_ids": ":RQ:".join(src.collectors),
+            "log_type": csv_safe(src.log_type),
+            "collector_ids": csv_safe(":RQ:".join(src.collectors)),
             "size_mb": src.size_mb,
             "size_gb": src.size_gb,
             "record_count": src.record_count,
@@ -306,26 +394,29 @@ def api_export_csv():
             "error_events": src.error_events,
             "normalization_rate_pct": src.normalization_rate_pct,
             "avg_bytes_per_record": src.avg_bytes_per_record,
-            "health_status": src.health_status,
+            "health_status": csv_safe(src.health_status),
         })
 
-    filename = f"secops_ingestion_{app.config['SECOPS_PROJECT_ID']}_{period}.csv"
+    # Both components were previously caller-influenced and flowed unescaped into
+    # a response header -- a reflected-file-download vector.
+    filename = f"secops_ingestion_{safe_filename_component(period)}.csv"
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment;filename={filename}"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
 @app.route("/api/export/json")
+@rate_limit(_query_limiter)
 def api_export_json():
     """Generates and downloads JSON."""
-    period = request.args.get("period", "daily").lower()
+    period = resolve_period(request.args.get("period", "daily"))
     summary = fetch_period_summary(period)
-    filename = f"secops_ingestion_{app.config['SECOPS_PROJECT_ID']}_{period}.json"
-    
+    filename = f"secops_ingestion_{safe_filename_component(period)}.json"
+
     data = {
-        "project_id": app.config["SECOPS_PROJECT_ID"],
+        "project_id": redact_project_id(app.config["SECOPS_PROJECT_ID"]),
         "period": summary.period_name,
         "start_time": summary.start_time,
         "end_time": summary.end_time,
@@ -353,7 +444,7 @@ def api_export_json():
     return Response(
         json.dumps(data, indent=2),
         mimetype="application/json",
-        headers={"Content-Disposition": f"attachment;filename={filename}"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

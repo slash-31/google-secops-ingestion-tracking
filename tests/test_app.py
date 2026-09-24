@@ -120,13 +120,129 @@ class TestAppEndpoints(unittest.TestCase):
         self.assertEqual(data["table_name"], "chronicle-[REDACTED_PROJECT_ID].datalake.ingestion_metrics")
 
     def test_api_collect_success(self):
+        import os
+        os.environ["CRON_SECRET"] = "supersecret123"
+        try:
+            res = self.app.post("/api/collect", headers={"X-Cron-Token": "supersecret123"})
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["status"], "success")
+            self.assertIn("collected_periods", data)
+            self.assertIn("daily", data["collected_periods"])
+            self.assertEqual(data["project_id"], "[REDACTED_PROJECT_ID]")
+        finally:
+            os.environ.pop("CRON_SECRET", None)
+
+    def test_api_collect_denied_when_secret_unset(self):
+        """Deny-by-default: an unconfigured CRON_SECRET disables the endpoint."""
+        import os
+        os.environ.pop("CRON_SECRET", None)
         res = self.app.post("/api/collect")
+        self.assertEqual(res.status_code, 503)
+
+    def test_api_collect_rejects_get(self):
+        """GET made this crawler-triggerable; only POST is accepted now."""
+        import os
+        os.environ["CRON_SECRET"] = "supersecret123"
+        try:
+            res = self.app.get("/api/collect", headers={"X-Cron-Token": "supersecret123"})
+            self.assertEqual(res.status_code, 405)
+        finally:
+            os.environ.pop("CRON_SECRET", None)
+
+    def test_api_settings_requires_admin_secret(self):
+        import os
+        os.environ.pop("ADMIN_SECRET", None)
+        res = self.app.post("/api/settings", json={"mock_mode": True})
+        self.assertEqual(res.status_code, 503)
+
+        os.environ["ADMIN_SECRET"] = "admintoken"
+        try:
+            unauth = self.app.post("/api/settings", json={"mock_mode": True})
+            self.assertEqual(unauth.status_code, 401)
+
+            ok = self.app.post(
+                "/api/settings",
+                json={"mock_mode": True},
+                headers={"Authorization": "Bearer admintoken"},
+            )
+            self.assertEqual(ok.status_code, 200)
+        finally:
+            os.environ.pop("ADMIN_SECRET", None)
+            app.config["MOCK_MODE"] = True
+
+    def test_api_settings_rejects_credentials_path(self):
+        """credentials_path was a filesystem probe; it is no longer settable."""
+        import os
+        os.environ["ADMIN_SECRET"] = "admintoken"
+        try:
+            res = self.app.post(
+                "/api/settings",
+                json={"credentials_path": "/etc/hosts"},
+                headers={"Authorization": "Bearer admintoken"},
+            )
+            self.assertEqual(res.status_code, 400)
+        finally:
+            os.environ.pop("ADMIN_SECRET", None)
+
+    def test_api_settings_rejects_invalid_project_id(self):
+        import os
+        os.environ["ADMIN_SECRET"] = "admintoken"
+        try:
+            for bad in ["../../etc", "UPPER-CASE", "x", "proj id"]:
+                res = self.app.post(
+                    "/api/settings",
+                    json={"project_id": bad},
+                    headers={"Authorization": "Bearer admintoken"},
+                )
+                self.assertEqual(res.status_code, 400, f"accepted bad id: {bad}")
+        finally:
+            os.environ.pop("ADMIN_SECRET", None)
+
+    def test_api_refresh_requires_admin_secret(self):
+        import os
+        os.environ.pop("ADMIN_SECRET", None)
+        res = self.app.post("/api/refresh")
+        self.assertEqual(res.status_code, 503)
+
+    def test_status_does_not_leak_token_or_project(self):
+        res = self.app.get("/api/status")
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
-        self.assertEqual(data["status"], "success")
-        self.assertIn("collected_periods", data)
-        self.assertIn("daily", data["collected_periods"])
-        self.assertEqual(data["project_id"], "[REDACTED_PROJECT_ID]")
+        self.assertNotIn("token_preview", data)
+        self.assertNotIn("error", data)
+        self.assertIn("*", data["project_id"])
+        cert = data.get("ssl_certificate")
+        if cert is not None:
+            self.assertNotIn("cert_path", cert)
+            self.assertNotIn("sans", cert)
+
+    def test_security_headers_present(self):
+        res = self.app.get("/")
+        for header in [
+            "X-Content-Type-Options",
+            "X-Frame-Options",
+            "Content-Security-Policy",
+            "Strict-Transport-Security",
+            "Referrer-Policy",
+            "Permissions-Policy",
+        ]:
+            self.assertIn(header, res.headers, f"missing {header}")
+        self.assertIn("frame-ancestors 'none'", res.headers["Content-Security-Policy"])
+
+    def test_export_filename_is_not_header_injectable(self):
+        res = self.app.get('/api/export/csv?period=daily";filename="evil.html')
+        disposition = res.headers.get("Content-Disposition", "")
+        # Unknown period collapses to the canonical key, so nothing caller-supplied
+        # reaches the header at all.
+        self.assertEqual(disposition, 'attachment; filename="secops_ingestion_daily.csv"')
+        self.assertEqual(disposition.count("filename="), 1)
+
+    def test_csv_formula_injection_is_neutralised(self):
+        from secops_ingestion.security import csv_safe
+        self.assertEqual(csv_safe("=1+1"), "'=1+1")
+        self.assertEqual(csv_safe("@SUM(A1)"), "'@SUM(A1)")
+        self.assertEqual(csv_safe("PAN_FIREWALL"), "PAN_FIREWALL")
 
     def test_api_collect_auth(self):
         import os

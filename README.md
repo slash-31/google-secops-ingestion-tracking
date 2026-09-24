@@ -206,7 +206,7 @@ The application can be fully configured via environment variables:
 
 | Variable | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `SECOPS_PROJECT_ID` | `string` | `secops-superweird` | The GCP Project ID containing the SecOps Cloud Monitoring metrics. |
+| `SECOPS_PROJECT_ID` | `string` | `your-secops-project-id` | The GCP Project ID containing the SecOps Cloud Monitoring metrics. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `string` | *None* | Path to the service account JSON key file (required for Option B). |
 | `PORT` | `integer` | `8080` | Port on which the HTTP/HTTPS web server listens. |
 | `SSL_ENABLED` | `boolean` | `false` | Enables HTTPS termination directly in the application (`true`/`false`). |

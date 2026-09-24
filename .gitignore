@@ -12,3 +12,7 @@ certs/
 daily_ingestion.*
 daily_report.*
 MagicMock/
+
+# Security review artifacts contain tenant identifiers and token fragments
+agy_securityreview.md
+*_securityreview.md

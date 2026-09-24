@@ -21,14 +21,23 @@ COPY secops_ingestion_cli.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
-ENV PORT=443 \
+# Run unprivileged. The internal listener moves to 8443 because a non-root user
+# cannot bind ports below 1024 -- publish with `-p 443:8443` on the host.
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin appuser \
+    && mkdir -p /app/certs \
+    && chown -R appuser:appuser /app
+
+ENV PORT=8443 \
     PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     MOCK_MODE=false \
     SSL_ENABLED=true
 
-EXPOSE 443 5000
+USER appuser
+
+EXPOSE 8443
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -k -f https://localhost:${PORT}/api/status || curl -f http://localhost:${PORT}/api/status || exit 1
+  CMD curl -k -fsS https://localhost:${PORT}/api/status || curl -fsS http://localhost:${PORT}/api/status || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

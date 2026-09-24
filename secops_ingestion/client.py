@@ -14,6 +14,7 @@ from google.auth.transport.requests import Request
 import google.auth
 from google.oauth2 import service_account
 
+from .security import validate_project_id
 from .config import (
     DEFAULT_PROJECT_ID,
     DEFAULT_INSTANCE_ID,
@@ -32,6 +33,9 @@ from .config import (
 
 logger = logging.getLogger("secops_ingestion.client")
 
+# Upper bound on Cloud Monitoring result pages per metric query.
+MAX_PAGES = 50
+
 
 class MonitoringAuthError(Exception):
     """Raised when authentication to Google Cloud Monitoring fails."""
@@ -47,11 +51,20 @@ class SecOpsMonitoringClient:
         credentials_path: Optional[str] = None,
         bearer_token: Optional[str] = None,
         mock_mode: bool = False,
+        allow_mock_fallback: bool = False,
     ):
-        self.project_id = project_id
+        # Validated here because project_id is interpolated directly into the
+        # Cloud Monitoring API URL path below. An unvalidated value lets a caller
+        # steer this server's authenticated requests at arbitrary GCP projects.
+        self.project_id = validate_project_id(project_id)
         self.credentials_path = credentials_path or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         self.bearer_token = bearer_token or os.environ.get("GCP_ACCESS_TOKEN")
         self.mock_mode = mock_mode
+        # When False (the default) an auth or API failure raises instead of
+        # silently substituting synthetic data. A monitoring dashboard that
+        # fabricates metrics during an outage is worse than one that errors.
+        self.allow_mock_fallback = allow_mock_fallback
+        self.degraded_reason: Optional[str] = None
         self._credentials = None
         self._session = requests.Session()
 
@@ -71,18 +84,22 @@ class SecOpsMonitoringClient:
                 "authenticated": True,
                 "mode": "live",
                 "project_id": self.project_id,
-                "token_preview": f"{token[:8]}...{token[-4:]}" if token else "none",
+                # token_preview intentionally removed: credential material of any
+                # length has no place in an unauthenticated diagnostic response.
+                "has_token": bool(token),
                 "credentials_source": "Service Account File" if self.credentials_path else "Application Default Credentials",
                 "message": "Successfully authenticated with Google Cloud.",
             }
         except Exception as e:
+            # Log the detail for the operator; return a generic message to the
+            # caller so filesystem paths and library internals are not disclosed.
+            logger.warning("Cloud Monitoring auth failed: %s", e)
             return {
                 "authenticated": False,
                 "mode": "unauthenticated",
                 "project_id": self.project_id,
-                "credentials_source": self.credentials_path or "Application Default Credentials",
-                "error": str(e),
-                "message": f"Cloud Monitoring auth failed: {e}. You can run with mock mode for testing.",
+                "credentials_source": "Service Account File" if self.credentials_path else "Application Default Credentials",
+                "message": "Cloud Monitoring authentication failed. Check server logs for detail.",
             }
 
     def _get_access_token(self) -> str:
@@ -165,7 +182,12 @@ class SecOpsMonitoringClient:
         try:
             token = self._get_access_token()
         except MonitoringAuthError as e:
-            logger.warning("Auth error (%s), falling back to mock mode", e)
+            if not self.allow_mock_fallback:
+                # Fail loudly. Returning synthetic data here would show a healthy
+                # dashboard while ingestion telemetry is actually unavailable.
+                raise
+            self.degraded_reason = f"authentication failed: {e}"
+            logger.error("Auth error (%s); serving SYNTHETIC data by explicit opt-in", e)
             return self._generate_mock_timeseries(
                 metric_type=metric_type,
                 start_time=start_time,
@@ -195,8 +217,12 @@ class SecOpsMonitoringClient:
 
         all_series: List[Dict[str, Any]] = []
         page_token = None
+        # Hard ceiling so a pathological or hostile project cannot hold a worker
+        # thread open indefinitely paging through results.
+        pages_remaining = MAX_PAGES
 
-        while True:
+        while pages_remaining > 0:
+            pages_remaining -= 1
             params: Dict[str, Any] = {
                 "filter": f'metric.type = "{full_metric_type}"',
                 "aggregation.groupByFields": group_by_param,
@@ -215,7 +241,17 @@ class SecOpsMonitoringClient:
             response = self._session.get(endpoint, headers=headers, params=params, timeout=30)
             
             if response.status_code == 403 or response.status_code == 401:
-                logger.warning("Cloud Monitoring API returned %d: %s. Falling back to synthetic mock data.", response.status_code, response.text)
+                logger.error(
+                    "Cloud Monitoring API returned %d for project %s",
+                    response.status_code, self.project_id,
+                )
+                if not self.allow_mock_fallback:
+                    raise MonitoringAuthError(
+                        f"Cloud Monitoring API rejected the request with HTTP "
+                        f"{response.status_code}. Verify the service account holds "
+                        f"roles/monitoring.viewer on the target project."
+                    )
+                self.degraded_reason = f"API returned HTTP {response.status_code}"
                 return self._generate_mock_timeseries(
                     metric_type=metric_type,
                     start_time=start_time,
@@ -232,6 +268,8 @@ class SecOpsMonitoringClient:
             page_token = data.get("nextPageToken")
             if not page_token:
                 break
+        else:
+            logger.warning("Stopped paging %s after %d pages", full_metric_type, MAX_PAGES)
 
         return all_series
 

@@ -711,11 +711,24 @@ function secopsDashboard() {
     },
 
     // Save Settings
+    //
+    // /api/settings mutates runtime state, so it is gated behind ADMIN_SECRET on
+    // the server. The token is prompted for per-save and deliberately never
+    // persisted to localStorage or sessionStorage.
     async saveSettings() {
+      const token = window.prompt('Admin token (ADMIN_SECRET) required to change settings:');
+      if (!token) {
+        this.showToast('Settings unchanged - no admin token supplied', 'danger');
+        return;
+      }
+
       try {
         const res = await fetch('/api/settings', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({
             project_id: this.settingsForm.projectId,
             mock_mode: this.settingsForm.mockMode
@@ -729,8 +742,13 @@ function secopsDashboard() {
           this.settingsModalOpen = false;
           this.showToast('Settings updated successfully', 'success');
           await this.loadAllData();
+        } else if (res.status === 503) {
+          this.showToast('Settings are disabled: ADMIN_SECRET is not configured on the server', 'danger');
+        } else if (res.status === 401) {
+          this.showToast('Rejected: invalid admin token', 'danger');
         } else {
-          this.showToast('Failed to update settings', 'danger');
+          const body = await res.json().catch(() => ({}));
+          this.showToast(body.error || 'Failed to update settings', 'danger');
         }
       } catch (err) {
         this.showToast('Error saving settings', 'danger');
