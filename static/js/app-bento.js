@@ -184,21 +184,37 @@ function secopsDashboard() {
 
         if (breakRes.ok) {
           const breakData = await breakRes.json();
-          this.sources = (breakData.log_sources || []).map(s => {
-            const ratio = s.record_count > 0 ? (s.normalized_events / s.record_count) * 100 : 100;
+          const rawList = breakData.log_types || breakData.log_sources || [];
+          this.sources = rawList.map(s => {
+            const records = s.record_count || 0;
+            const normEvents = s.normalized_event_count ?? s.normalized_events ?? 0;
+            const ratio = s.normalization_rate_pct ?? (records > 0 ? (normEvents / records) * 100 : 100);
+            const collectorsList = Array.isArray(s.collectors) ? s.collectors.join(', ') : (s.collector_ids || '');
+            
             let health = 'optimal';
-            if (s.error_events > 0 || ratio < 80) health = 'degraded';
-            else if (ratio < 95) health = 'warning';
+            if (s.health_status) {
+              if (s.health_status === 'HEALTHY') health = 'optimal';
+              else if (s.health_status === 'CRITICAL_DROPS') health = 'degraded';
+              else health = 'warning';
+            } else {
+              if ((s.error_events || 0) > 0 || ratio < 80) health = 'degraded';
+              else if (ratio < 95) health = 'warning';
+            }
+
             return {
               ...s,
+              normalized_events: normEvents,
+              collector_ids: collectorsList,
               ratio_pct: Math.min(ratio, 100),
               health: health
             };
           });
 
-          // Calculate Health counts
-          this.summary.healthyCount = this.sources.filter(s => s.health === 'optimal').length;
-          this.summary.errorCount = this.sources.filter(s => s.health !== 'optimal').length;
+          // Calculate Health counts if not explicitly populated
+          if (!this.summary.healthyCount && !this.summary.errorCount) {
+            this.summary.healthyCount = this.sources.filter(s => s.health === 'optimal').length;
+            this.summary.errorCount = this.sources.filter(s => s.health !== 'optimal').length;
+          }
 
           this.renderDonutChart(this.sources);
         }
@@ -229,12 +245,18 @@ function secopsDashboard() {
       this.summary.totalSizeMb = data.total_size_mb || 0;
       this.summary.totalRecords = data.total_records || 0;
       this.summary.totalNormalizedEvents = data.total_normalized_events || 0;
-      this.summary.normRatioPct = data.overall_norm_ratio_pct || 100;
-      this.summary.activeSources = data.active_sources || 0;
+      this.summary.normRatioPct = data.overall_norm_ratio ?? data.overall_norm_ratio_pct ?? 100;
+      this.summary.activeSources = data.active_log_types_count ?? data.active_sources ?? 0;
+      this.summary.healthyCount = data.healthy_sources_count ?? this.summary.healthyCount;
+      this.summary.errorCount = (data.critical_sources_count || 0) + (data.warning_sources_count || 0);
       this.summary.unparsedRecords = Math.max(0, this.summary.totalRecords - this.summary.totalNormalizedEvents);
       this.summary.periodTitle = data.period || this.period;
 
-      if (data.interval) {
+      if (data.start_time && data.end_time) {
+        const start = new Date(data.start_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const end = new Date(data.end_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        this.summary.intervalStr = `${start} — ${end} UTC`;
+      } else if (data.interval) {
         const start = new Date(data.interval.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         const end = new Date(data.interval.end).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         this.summary.intervalStr = `${start} — ${end} UTC`;
@@ -352,19 +374,34 @@ function secopsDashboard() {
       const ctx = document.getElementById('bentoVolumeChart');
       if (!ctx) return;
 
-      const labels = (tsData.timestamps || []).map(t => {
-        const d = new Date(t);
+      if (this.volumeChart) {
+        this.volumeChart.destroy();
+        this.volumeChart = null;
+      }
+
+      if (!tsData) return;
+
+      let points = [];
+      if (tsData.timeline && Array.isArray(tsData.timeline)) {
+        points = tsData.timeline;
+      } else if (tsData.timestamps && Array.isArray(tsData.timestamps)) {
+        points = tsData.timestamps.map((t, idx) => ({
+          timestamp: t,
+          bytes: (tsData.bytes_timeseries && tsData.bytes_timeseries[idx]) || 0,
+          records: (tsData.records_timeseries && tsData.records_timeseries[idx]) || 0
+        }));
+      }
+
+      const labels = points.map(pt => {
+        const d = new Date(pt.timestamp);
+        if (isNaN(d.getTime())) return pt.timestamp || '';
         if (this.period === 'daily') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         if (this.period === 'weekly') return d.toLocaleDateString([], { weekday: 'short', hour: '2-digit' });
         return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
       });
 
-      const volumeGbData = (tsData.bytes_timeseries || []).map(b => parseFloat((b / 1e9).toFixed(3)));
-      const recordsData = tsData.records_timeseries || [];
-
-      if (this.volumeChart) {
-        this.volumeChart.destroy();
-      }
+      const volumeGbData = points.map(pt => parseFloat(((pt.bytes || 0) / 1e9).toFixed(3)));
+      const recordsData = points.map(pt => pt.records || 0);
 
       const showVolume = this.chartMetric === 'volume' || this.chartMetric === 'both';
       const showRecords = this.chartMetric === 'records' || this.chartMetric === 'both';
@@ -415,7 +452,7 @@ function secopsDashboard() {
           pointRadius: labels.length > 30 ? 0 : 3,
           pointHoverRadius: 6,
           pointBackgroundColor: '#a855f7',
-          yAxisID: showVolume ? 'yRecords' : 'yVolume'
+          yAxisID: 'yRecords'
         });
       }
 
@@ -476,26 +513,28 @@ function secopsDashboard() {
               grid: { color: 'rgba(255, 255, 255, 0.04)' },
               ticks: { color: '#64748b', font: { family: 'Inter', size: 10 }, maxRotation: 0 }
             },
-            yVolume: {
-              position: 'left',
-              grid: { color: 'rgba(255, 255, 255, 0.04)' },
-              ticks: {
-                color: '#38bdf8',
-                font: { family: 'JetBrains Mono', size: 10 },
-                callback: (v) => v + ' GB'
+            ...(showVolume ? {
+              yVolume: {
+                position: 'left',
+                grid: { color: 'rgba(255, 255, 255, 0.04)' },
+                ticks: {
+                  color: '#38bdf8',
+                  font: { family: 'JetBrains Mono', size: 10 },
+                  callback: (v) => v + ' GB'
+                }
               }
-            },
-            ...(showVolume && showRecords ? {
+            } : {}),
+            ...(showRecords ? {
               yRecords: {
-                position: 'right',
-                grid: { drawOnChartArea: false },
+                position: showVolume ? 'right' : 'left',
+                grid: { drawOnChartArea: !showVolume, color: 'rgba(255, 255, 255, 0.04)' },
                 ticks: {
                   color: '#c084fc',
                   font: { family: 'JetBrains Mono', size: 10 },
                   callback: (v) => {
                     if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
                     if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
-                    return v;
+                    return v.toLocaleString();
                   }
                 }
               }
@@ -510,12 +549,19 @@ function secopsDashboard() {
       const ctx = document.getElementById('bentoDonutChart');
       if (!ctx) return;
 
+      if (this.donutChart) {
+        this.donutChart.destroy();
+        this.donutChart = null;
+      }
+
+      if (!sources || sources.length === 0) return;
+
       const topSources = [...sources]
-        .sort((a, b) => b.bytes_count - a.bytes_count)
+        .sort((a, b) => (b.bytes_count || 0) - (a.bytes_count || 0))
         .slice(0, 6);
 
       const labels = topSources.map(s => s.log_type);
-      const data = topSources.map(s => parseFloat((s.bytes_count / 1e9).toFixed(3)));
+      const data = topSources.map(s => parseFloat(((s.bytes_count || 0) / 1e9).toFixed(3)));
 
       const cyberColors = [
         '#00f2fe',
@@ -526,17 +572,13 @@ function secopsDashboard() {
         '#f43f5e'
       ];
 
-      if (this.donutChart) {
-        this.donutChart.destroy();
-      }
-
       this.donutChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
           labels: labels,
           datasets: [{
             data: data,
-            backgroundColor: cyberColors,
+            backgroundColor: cyberColors.slice(0, labels.length),
             borderColor: '#080c14',
             borderWidth: 2,
             hoverOffset: 6
@@ -557,15 +599,16 @@ function secopsDashboard() {
                 pointStyle: 'circle',
                 font: { family: 'Inter', size: 10 },
                 generateLabels: function(chart) {
-                  const data = chart.data;
-                  if (data.labels.length && data.datasets.length) {
-                    return data.labels.map((label, i) => {
-                      const val = data.datasets[0].data[i];
+                  const chartData = chart.data;
+                  if (chartData.labels.length && chartData.datasets.length) {
+                    return chartData.labels.map((label, i) => {
+                      const val = chartData.datasets[0].data[i];
                       const shortLabel = label.length > 14 ? label.slice(0, 14) + '…' : label;
+                      const displayVal = val >= 0.01 ? `${val} GB` : `${(val * 1000).toFixed(1)} MB`;
                       return {
-                        text: `${shortLabel} (${val} GB)`,
-                        fillStyle: data.datasets[0].backgroundColor[i],
-                        strokeStyle: data.datasets[0].borderColor,
+                        text: `${shortLabel} (${displayVal})`,
+                        fillStyle: chartData.datasets[0].backgroundColor[i],
+                        strokeStyle: chartData.datasets[0].borderColor,
                         lineWidth: 1,
                         hidden: false,
                         index: i
@@ -588,7 +631,9 @@ function secopsDashboard() {
               bodyFont: { family: 'JetBrains Mono', size: 11 },
               callbacks: {
                 label: function(context) {
-                  return ` ${context.label}: ${context.parsed} GB`;
+                  const val = context.parsed;
+                  const displayVal = val >= 0.01 ? `${val} GB` : `${(val * 1000).toFixed(1)} MB`;
+                  return ` ${context.label}: ${displayVal}`;
                 }
               }
             }

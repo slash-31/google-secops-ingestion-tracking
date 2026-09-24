@@ -608,23 +608,31 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-white/5">
-              <template x-for="row in reconcileRows" :key="row.log_type">
+              <template x-for="row in reconcileRows" :key="row.log_type + '-' + (row.collector_id || '')">
                 <tr class="hover:bg-white/[0.03] transition-colors">
-                  <td class="py-3 px-4 font-semibold text-white" x-text="row.log_type"></td>
-                  <td class="py-3 px-4 text-right text-slate-300" x-text="formatBytes(row.sum_30m_bytes)"></td>
-                  <td class="py-3 px-4 text-right text-slate-300" x-text="formatBytes(row.rollup_bytes)"></td>
+                  <td class="py-3 px-4">
+                    <div class="font-semibold text-white" x-text="row.log_type"></div>
+                    <div class="text-[10px] text-slate-500 truncate max-w-xs" x-show="row.collector_id" x-text="row.collector_id"></div>
+                  </td>
+                  <td class="py-3 px-4 text-right text-slate-300" x-text="formatBytes(row.sum_30m ?? row.sum_30m_bytes)"></td>
+                  <td class="py-3 px-4 text-right text-slate-300" x-text="formatBytes(row.rollup ?? row.rollup_bytes)"></td>
                   <td class="py-3 px-4 text-center">
                     <span class="px-2 py-0.5 rounded text-[10px] font-bold"
                           :class="{
-                            'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30': row.status === 'EXACT_MATCH',
-                            'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30': row.status === '30M_DOMINATES',
-                            'bg-purple-500/10 text-purple-400 border border-purple-500/30': row.status === 'ROLLUP_DOMINATES'
+                            'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30': (row.winner === 'Equal' || row.status === 'EXACT_MATCH'),
+                            'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30': (row.winner === '30m Sum' || row.status === '30M_DOMINATES'),
+                            'bg-purple-500/10 text-purple-400 border border-purple-500/30': (row.winner === 'Rollup Window' || row.status === 'ROLLUP_DOMINATES')
                           }"
-                          x-text="row.status"></span>
+                          x-text="row.winner || row.status"></span>
                   </td>
-                  <td class="py-3 px-4 text-right font-bold text-cyan-300" x-text="formatBytes(row.official_bytes)"></td>
+                  <td class="py-3 px-4 text-right font-bold text-cyan-300" x-text="formatBytes(row.official_max ?? row.official_bytes)"></td>
                 </tr>
               </template>
+              <tr x-show="reconcileRows.length === 0">
+                <td colspan="5" class="py-12 text-center text-slate-500 font-sans">
+                  No reconciliation records found for this period.
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -671,6 +679,11 @@
                       x-text="formatNumber(b.error_events)"></td>
                 </tr>
               </template>
+              <tr x-show="bigqueryRows.length === 0">
+                <td colspan="7" class="py-12 text-center text-slate-500 font-sans">
+                  No BigQuery compatible records found for this period.
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
