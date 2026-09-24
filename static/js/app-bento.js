@@ -3,6 +3,13 @@
  * Alpine.js Reactive State Controller with Chart.js Integration
  */
 
+// Configure high-contrast global defaults for Chart.js in dark theme
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color = '#f1f5f9';
+  Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.08)';
+  Chart.defaults.font.family = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+}
+
 function secopsDashboard() {
   return {
     // Core State
@@ -475,12 +482,12 @@ function secopsDashboard() {
               position: 'top',
               align: 'end',
               labels: {
-                color: '#94a3b8',
+                color: '#f8fafc',
                 boxWidth: 10,
                 boxHeight: 10,
                 usePointStyle: true,
                 pointStyle: 'circle',
-                font: { family: 'Inter', size: 11, weight: '500' }
+                font: { family: 'Inter', size: 11, weight: '600' }
               }
             },
             tooltip: {
@@ -511,7 +518,7 @@ function secopsDashboard() {
           scales: {
             x: {
               grid: { color: 'rgba(255, 255, 255, 0.04)' },
-              ticks: { color: '#64748b', font: { family: 'Inter', size: 10 }, maxRotation: 0 }
+              ticks: { color: '#94a3b8', font: { family: 'Inter', size: 10 }, maxRotation: 0 }
             },
             ...(showVolume ? {
               yVolume: {
@@ -592,12 +599,13 @@ function secopsDashboard() {
             legend: {
               position: 'right',
               labels: {
-                color: '#94a3b8',
-                boxWidth: 8,
-                boxHeight: 8,
+                color: '#f8fafc',
+                boxWidth: 10,
+                boxHeight: 10,
                 usePointStyle: true,
                 pointStyle: 'circle',
-                font: { family: 'Inter', size: 10 },
+                padding: 10,
+                font: { family: 'Inter', size: 11, weight: '500' },
                 generateLabels: function(chart) {
                   const chartData = chart.data;
                   if (chartData.labels.length && chartData.datasets.length) {
@@ -609,6 +617,7 @@ function secopsDashboard() {
                         text: `${shortLabel} (${displayVal})`,
                         fillStyle: chartData.datasets[0].backgroundColor[i],
                         strokeStyle: chartData.datasets[0].borderColor,
+                        fontColor: '#f8fafc',
                         lineWidth: 1,
                         hidden: false,
                         index: i
@@ -632,8 +641,10 @@ function secopsDashboard() {
               callbacks: {
                 label: function(context) {
                   const val = context.parsed;
+                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                  const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
                   const displayVal = val >= 0.01 ? `${val} GB` : `${(val * 1000).toFixed(1)} MB`;
-                  return ` ${context.label}: ${displayVal}`;
+                  return ` ${context.label}: ${displayVal} (${pct}%)`;
                 }
               }
             }
