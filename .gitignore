@@ -11,3 +11,4 @@ certs/
 *.csv
 daily_ingestion.*
 daily_report.*
+MagicMock/
