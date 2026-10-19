@@ -213,6 +213,22 @@ The application can be fully configured via environment variables:
 | `SSL_CERT_PATH` | `string` | `certs/cert.pem` | Path to public SSL certificate file (PEM format). |
 | `SSL_KEY_PATH` | `string` | `certs/key.pem` | Path to private SSL key file (PEM format). |
 | `MOCK_MODE` | `boolean` | `false` | When `true`, serves synthetic demo data without making GCP API calls. |
+| `HOST` | `string` | `0.0.0.0` | Bind address for `python3 app.py`. Use `127.0.0.1` for local-only development. |
+| `BINDPLANE_ACCOUNT_ID` | `string` | *None* | BindPlane Cloud **project** ID (26-char ULID). Enables the Pipeline Health panel. |
+| `BINDPLANE_API_KEY_FILE` | `string` | *None* | Path to a file containing the BindPlane API key (preferred over `BINDPLANE_API_KEY`). |
+| `BINDPLANE_API_KEY` | `string` | *None* | BindPlane API key passed directly. Avoid in shared shells; prefer the file variant. |
+| `BINDPLANE_BASE_URL` | `string` | `https://app.bindplane.com` | Override for self-hosted BindPlane Server. Must be `https://`. |
+| `PIPELINE_DROP_WARN_PCT` / `PIPELINE_DROP_CRIT_PCT` | `float` | `20` / `50` | Collector in-to-out loss percentage that raises a warning / critical. |
+| `PIPELINE_DROP_MIN_INPUT_BPS` | `float` | `100` | Ignore drop math for collectors receiving less than this many bytes/sec. |
+| `PIPELINE_SILENT_BPS` | `float` | `0` | Collector/source throughput at or below this is considered silent. |
+| `SECOPS_SILENT_AFTER_MINUTES` | `integer` | `90` | Minimum silence before a SecOps log type is flagged. |
+| `SECOPS_SILENT_CADENCE_MULTIPLIER` | `float` | `3` | Flag silence once the gap exceeds this multiple of the log type's normal arrival interval. |
+| `SECOPS_SILENT_MIN_BUCKETS` | `integer` | `4` | Minimum non-zero 30m buckets in 24h before a log type is evaluated. |
+| `SECOPS_SILENT_IGNORE_LOG_TYPES` | `csv` | *None* | Comma-separated log types never flagged as silent (e.g. known batch feeds). |
+| `BINDPLANE_SECOPS_COLLECTOR_IDS` | `csv` | `aaaa1111-aaaa-1111-aaaa-1111aaaa1112` | SecOps `collector_id`(s) that identify BindPlane traffic (observed fixed value for the Chronicle exporter). |
+| `DELIVERY_GAP_WARN_PCT` / `DELIVERY_GAP_CRIT_PCT` | `float` | `50` / `80` | Drop in the recent SecOps/BindPlane ratio vs its 24h baseline that raises a warning / critical. |
+| `DELIVERY_BASELINE_OUTLIER_PCT` | `float` | `75` | Flag a log type whose 24h ratio is this far below the fleet-median ratio. |
+| `DELIVERY_MIN_BYTES` | `float` | `1000000` | Ignore log-type groups with less BindPlane volume than this in a window. |
 
 ---
 
@@ -373,6 +389,58 @@ gcloud scheduler jobs create http secops-hourly-collector \
 
 ---
 
+## 🩺 BindPlane Pipeline Health
+
+The **Pipeline Health** panel (top of the dashboard) combines BindPlane Cloud collector state with SecOps ingestion telemetry and lists active issues by severity. Issues are computed on demand (60s cache) and held in memory only; nothing is written to Cloud Monitoring.
+
+### Enable
+
+```bash
+chmod 600 ~/.creds/bindplane-api.txt
+export BINDPLANE_ACCOUNT_ID="<bindplane-project-id>"
+export BINDPLANE_API_KEY_FILE="~/.creds/bindplane-api.txt"
+```
+
+BindPlane Cloud requires **both** `X-Bindplane-Api-Key` and `X-Bindplane-Account-ID`; an API key cannot discover its own account. If BindPlane is not configured the panel says so and still shows SecOps-side issues.
+
+### Detection Rules
+
+| Category | Severity | Trigger |
+| :--- | :---: | :--- |
+| `AGENT_DISCONNECTED` | critical | Collector not connected to BindPlane. |
+| `AGENT_SILENT` | critical | Connected, but zero bytes to the SecOps destination in the window (or no throughput reported). |
+| `SOURCE_SILENT` | warning | One source on a collector is at zero while its other sources are flowing. |
+| `PIPELINE_DROP` | warning / critical | Destination out is ≥20% / ≥50% below source in. Processors that filter on purpose can trigger this; tune the thresholds. |
+| `AGENT_CONFIG_FAILED` | critical | OpAMP `remoteConfigStatus = FAILED`. |
+| `CONFIG_ROLLOUT_ERROR` | critical | Configuration rollout reports agent errors. |
+| `AGENT_UNHEALTHY` / `AGENT_STATUS_ABNORMAL` | warning | Non-zero `healthStatus` or non-standard agent `status`. |
+| `AGENTS_OUT_OF_DATE` | info | Aggregate count of collectors with an upgrade available. |
+| `SECOPS_LOG_TYPE_SILENT` | critical | A log type stops arriving for longer than `max(90 min, 3 × its median arrival gap)`. Batch/context feeds are judged against their own cadence. |
+| `SECOPS_PARSER_FAILURE` | critical | Records arriving, zero UDM events produced. |
+| `SECOPS_NORMALIZATION_LOW` | warning | Normalization ratio below 75% (heuristic: one record can yield 0..N events). |
+| `BINDPLANE_API_UNAVAILABLE` / `SECOPS_TELEMETRY_UNAVAILABLE` | critical | An upstream API failed. The other system's issues are still reported. |
+| `SOURCE_NO_DATA_24H` | warning | A configured source reported no throughput at all in 24h (e.g. a syslog listener nobody sends to). |
+| `DELIVERY_STOPPED` | critical | BindPlane sent a log type in the last hour; SecOps received none. |
+| `DELIVERY_GAP` | warning / critical | The recent SecOps/BindPlane ratio fell ≥50% / ≥80% below that log type's 24h ratio. |
+| `DELIVERY_GAP_24H` | warning | A log type's 24h ratio is far below the fleet median, which usually means a burst was dropped. Names the collector that sent most of it. |
+| `LOG_TYPE_NOT_IN_SECOPS` | warning | BindPlane sent a log type all day that SecOps never recorded (typo, unsupported log type, or rejected). |
+
+### Limitations
+
+- BindPlane exposes throughput as **bytes/sec only** (no record counts), averaged over the window.
+- State (first-seen, recently resolved) is per-process and resets on restart.
+
+### Delivery Reconciliation (BindPlane sent vs SecOps received)
+
+The **Delivery** tab compares, per SecOps log type, what BindPlane sent against what SecOps received:
+
+1. **Mapping**: each BindPlane source's `google_secops_standardization` processor declares its SecOps `logType`. Throughput node IDs (`source/<name>_<source-id>`) attribute bytes to those log types. A source that emits several log types conditionally is treated as one group and compared against the sum of those types in SecOps.
+2. **Collector identity**: SecOps tags all BindPlane traffic with one fixed `collector_id`, so individual collectors cannot be told apart on the SecOps side. Log type is the only shared key; per-collector attribution comes from BindPlane.
+3. **Ratios, not equality**: BindPlane measures OTLP payload (uncompressed, with attributes) while SecOps counts raw bytes, so the ratio is typically about 0.3–0.5, not 1.0. Each group is judged against its own 24h ratio and against the fleet-median ratio.
+4. **Lag**: the SecOps "recent" window ends 30 minutes before the latest data, because the newest bucket is usually still filling.
+
+---
+
 ## 🌐 REST API Reference
 
 | Endpoint | Method | Query Parameters | Description |
@@ -387,6 +455,7 @@ gcloud scheduler jobs create http secops-hourly-collector \
 | `/api/export/csv` | `GET` | `period` | Downloads the ingestion summary as a CSV file. |
 | `/api/export/json` | `GET` | `period` | Downloads the ingestion summary as structured JSON. |
 | `/api/refresh` | `POST` | *None* | Invalidates metric cache for on-demand UI refreshes. |
+| `/api/pipeline/health` | `GET` | `window` (`5m`, `1h`, `24h`) | BindPlane + SecOps pipeline issues, collector table, delivery reconciliation, and Unified View rows. |
 
 ---
 
@@ -396,6 +465,8 @@ A comprehensive unit test suite is included in the `tests/` directory:
 
 ```bash
 python3 -m unittest discover tests
+# or
+pip install -r requirements-dev.txt && python3 -m pytest -q
 ```
 
 ### What the Tests Cover:
@@ -404,6 +475,7 @@ python3 -m unittest discover tests
 3. **BigQuery Schema Compatibility**: Verifies that delimiter `:RQ:` and field mappings match legacy BigQuery table schemas.
 4. **Mock Mode Fallback**: Guarantees that the app runs completely offline without network or GCP dependencies.
 5. **REST API Endpoints**: Tests HTTP response status codes, JSON structures, and input validation.
+6. **BindPlane, Delivery & Unified View**: Tests collector health rules, cadence-aware silence detection, BindPlane-to-SecOps delivery reconciliation, and the side-by-side Unified View join engine.
 
 ---
 
@@ -416,6 +488,17 @@ python3 -m unittest discover tests
 ---
 
 ## 📝 Release Notes & Changelog
+
+### Version 2.4.0 (October 2026)
+- **Unified View (`BindPlane | Delivery | SecOps`)**: Default first tab joining BindPlane collector metrics, delivery ratios, and SecOps Cloud Monitoring metrics (1h, 24h, UDM %, 24h sparkline, path classification) into a single row per log type with expandable per-collector drill-down.
+- **Delivery Reconciliation**: BindPlane-to-SecOps comparison per log type (`DELIVERY_STOPPED`, `DELIVERY_GAP`, `DELIVERY_GAP_24H`, `LOG_TYPE_NOT_IN_SECOPS`) with attribution to the collector responsible, plus a Delivery tab.
+- **Idle Source Detection**: `SOURCE_NO_DATA_24H` for configured sources that produced nothing in 24h.
+
+### Version 2.3.0 (October 2026)
+- **BindPlane Pipeline Health**: New panel and `/api/pipeline/health` endpoint surfacing collector outages, silent collectors/sources, in-to-out drops, config/rollout failures, silent SecOps log types, and parser failures.
+- **Cadence-Aware Silence Detection**: SecOps log-type silence is judged against each feed's own arrival interval, avoiding false alarms on batch context feeds.
+- **Upstream Isolation**: A BindPlane or Cloud Monitoring outage is reported as an issue instead of failing the panel.
+- **Dev Tooling**: Added `requirements-dev.txt`; `HOST` env var for loopback-only local runs.
 
 ### Version 2.2.0 (September 2026)
 - **High-Contrast Canvas Accessibility**:

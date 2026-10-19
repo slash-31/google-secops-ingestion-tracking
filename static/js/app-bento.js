@@ -22,7 +22,12 @@ function secopsDashboard() {
     countdownInterval: null,
     
     // UI Navigation
-    activeTab: 'sources',
+    activeTab: 'unified',
+
+    // Unified view (BindPlane | Delivery | SecOps per log type)
+    unifiedSearch: '',
+    unifiedFilter: 'all', // 'all' | 'issues' | 'bindplane'
+    unifiedExpanded: {},
     chartMetric: 'both', // 'volume', 'records', 'both'
     cachedTsData: null,
     searchQuery: '',
@@ -68,6 +73,24 @@ function secopsDashboard() {
     sources: [],
     reconcileRows: [],
     bigqueryRows: [],
+
+    // Pipeline Health (BindPlane + SecOps issues)
+    pipeline: {
+      loaded: false,
+      error: '',
+      generatedAt: '',
+      counts: { critical: 0, warning: 0, info: 0 },
+      issues: [],
+      resolved: [],
+      agents: [],
+      delivery: [],
+      unified: [],
+      deliveryInfo: { available: false },
+      fleetRatio: null,
+      bindplane: { configured: false },
+      secops: { available: true }
+    },
+    pipelineView: 'issues', // 'issues' | 'agents' | 'delivery''
 
     // Chart.js Instances
     volumeChart: null,
@@ -172,10 +195,111 @@ function secopsDashboard() {
       this.showToast(`Switched view to ${this.period.toUpperCase()}`, 'info');
     },
 
+    // API: Pipeline Health (fire-and-forget so it never delays core KPIs)
+    async loadPipelineHealth() {
+      try {
+        const res = await fetch('/api/pipeline/health?window=1h');
+        if (!res.ok) {
+          this.pipeline.error = `Pipeline health unavailable (HTTP ${res.status})`;
+          return;
+        }
+        const data = await res.json();
+        this.pipeline = {
+          loaded: true,
+          error: '',
+          generatedAt: data.generated_at || '',
+          counts: data.counts || { critical: 0, warning: 0, info: 0 },
+          issues: data.issues || [],
+          resolved: data.recently_resolved || [],
+          agents: data.agents || [],
+          delivery: data.delivery || [],
+          unified: data.unified || [],
+          deliveryInfo: data.delivery_info || { available: false },
+          fleetRatio: (data.delivery || []).find(d => d.fleet_ratio_baseline != null)?.fleet_ratio_baseline ?? null,
+          bindplane: data.bindplane || { configured: false },
+          secops: data.secops || { available: true }
+        };
+      } catch (err) {
+        console.error('Failed to load pipeline health:', err);
+        this.pipeline.error = 'Pipeline health request failed';
+      }
+    },
+
+    get unified() {
+      return this.pipeline.unified || [];
+    },
+
+    get filteredUnified() {
+      const q = this.unifiedSearch.trim().toLowerCase();
+      return this.unified.filter(r => {
+        if (this.unifiedFilter === 'issues' && r.status === 'ok') return false;
+        if (this.unifiedFilter === 'bindplane' && !r.bindplane) return false;
+        if (!q) return true;
+        const collectors = (r.bindplane?.collectors || []).map(c => c.name).join(' ');
+        return (r.label + ' ' + r.paths.join(' ') + ' ' + collectors).toLowerCase().includes(q);
+      });
+    },
+
+    get unifiedCounts() {
+      const rows = this.unified;
+      return {
+        total: rows.length,
+        bindplane: rows.filter(r => r.bindplane).length,
+        issues: rows.filter(r => r.status !== 'ok').length
+      };
+    },
+
+    toggleUnified(key) {
+      this.unifiedExpanded = { ...this.unifiedExpanded, [key]: !this.unifiedExpanded[key] };
+    },
+
+    sparkPoints(values, width = 120, height = 24) {
+      if (!values || values.length < 2) return '';
+      const max = Math.max(...values, 1);
+      const step = width / (values.length - 1);
+      return values.map((v, i) => `${(i * step).toFixed(1)},${(height - (v / max) * (height - 2) - 1).toFixed(1)}`).join(' ');
+    },
+
+    pathClasses(path) {
+      if (path === 'BindPlane') return 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40';
+      if (path === 'GCP direct') return 'bg-violet-500/15 text-violet-300 border-violet-500/40';
+      if (path === 'Feed / context') return 'bg-slate-500/20 text-slate-300 border-slate-500/40';
+      return 'bg-white/5 text-slate-400 border-white/10';
+    },
+
+    severityClasses(sev) {
+      if (sev === 'critical') return 'bg-rose-500/15 text-rose-300 border-rose-500/40';
+      if (sev === 'warning') return 'bg-amber-500/15 text-amber-300 border-amber-500/40';
+      if (sev === 'info') return 'bg-sky-500/15 text-sky-300 border-sky-500/40';
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
+    },
+
+    deliverySeverity(status) {
+      if (status === 'stopped') return 'critical';
+      if (status === 'gap' || status === 'gap_24h' || status === 'missing') return 'warning';
+      if (status === 'low_volume') return 'info';
+      return 'ok';
+    },
+
+    formatBps(bps) {
+      const v = Number(bps) || 0;
+      if (v >= 1e6) return (v / 1e6).toFixed(2) + ' MB/s';
+      if (v >= 1e3) return (v / 1e3).toFixed(1) + ' KB/s';
+      return v.toFixed(1) + ' B/s';
+    },
+
+    get pipelineOverall() {
+      if (!this.pipeline.loaded) return 'loading';
+      if (this.pipeline.counts.critical > 0) return 'critical';
+      if (this.pipeline.counts.warning > 0) return 'warning';
+      return 'ok';
+    },
+
     // Primary Data Loader
     async loadAllData() {
       this.loading = true;
       const startTime = performance.now();
+      this.loadPipelineHealth();
 
       try {
         const [sumRes, breakRes, tsRes] = await Promise.all([

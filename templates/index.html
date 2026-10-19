@@ -222,6 +222,176 @@
     </div>
 
     <!-- ========================================================================= -->
+    <!-- PIPELINE HEALTH: BINDPLANE COLLECTORS + SECOPS INGESTION ISSUES            -->
+    <!-- ========================================================================= -->
+    <section class="bento-card p-5" id="pipeline-health">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <span class="w-2.5 h-2.5 rounded-full"
+                :class="{
+                  'bg-rose-500 animate-pulse': pipelineOverall === 'critical',
+                  'bg-amber-400': pipelineOverall === 'warning',
+                  'bg-emerald-400': pipelineOverall === 'ok',
+                  'bg-slate-500': pipelineOverall === 'loading'
+                }"></span>
+          <div>
+            <h3 class="text-sm font-bold uppercase tracking-wider text-white font-mono">Pipeline Health</h3>
+            <p class="text-[11px] text-slate-400 font-mono">
+              <span x-show="pipeline.bindplane.configured"
+                    x-text="'BindPlane: ' + (pipeline.bindplane.connected_count ?? 0) + '/' + (pipeline.bindplane.agent_count ?? 0) + ' collectors connected' + (pipeline.bindplane.mock ? ' (mock)' : '')"></span>
+              <span x-show="!pipeline.bindplane.configured" class="text-amber-300"
+                    x-text="pipeline.bindplane.message || 'BindPlane not configured'"></span>
+              <span class="text-slate-600"> • </span>
+              <span x-text="pipeline.secops.available ? 'SecOps telemetry OK' : 'SecOps telemetry unavailable'"
+                    :class="pipeline.secops.available ? '' : 'text-rose-300'"></span>
+              <span class="text-slate-600" x-show="pipeline.generatedAt"> • </span>
+              <span x-show="pipeline.generatedAt" x-text="'updated ' + pipeline.generatedAt"></span>
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 text-xs font-mono">
+          <span class="px-2 py-1 rounded-lg border" :class="severityClasses('critical')"
+                x-text="pipeline.counts.critical + ' critical'"></span>
+          <span class="px-2 py-1 rounded-lg border" :class="severityClasses('warning')"
+                x-text="pipeline.counts.warning + ' warning'"></span>
+          <span class="px-2 py-1 rounded-lg border" :class="severityClasses('info')"
+                x-text="pipeline.counts.info + ' info'"></span>
+          <div class="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10 ml-2">
+            <button class="px-2 py-1 rounded-lg transition"
+                    :class="pipelineView === 'issues' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-white'"
+                    @click="pipelineView = 'issues'">Issues</button>
+            <button class="px-2 py-1 rounded-lg transition"
+                    :class="pipelineView === 'agents' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-white'"
+                    @click="pipelineView = 'agents'">Collectors</button>
+            <button class="px-2 py-1 rounded-lg transition"
+                    :class="pipelineView === 'delivery' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-white'"
+                    @click="pipelineView = 'delivery'">Delivery</button>
+          </div>
+        </div>
+      </div>
+
+      <p x-show="pipeline.error" class="mt-3 text-xs font-mono text-rose-300" x-text="pipeline.error"></p>
+
+      <!-- Issues list -->
+      <div x-show="pipelineView === 'issues'" class="mt-4 space-y-2">
+        <template x-if="pipeline.loaded && pipeline.issues.length === 0">
+          <div class="text-xs font-mono text-emerald-300 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10">
+            No active pipeline issues.
+          </div>
+        </template>
+        <template x-for="issue in pipeline.issues" :key="issue.key">
+          <div class="flex items-start gap-3 px-3 py-2 rounded-lg border text-xs font-mono" :class="severityClasses(issue.severity)">
+            <span class="uppercase font-bold w-16 shrink-0" x-text="issue.severity"></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-semibold text-white" x-text="issue.category"></span>
+                <span class="text-slate-400" x-text="issue.entity"></span>
+              </div>
+              <div class="text-slate-200 mt-0.5" x-text="issue.message"></div>
+            </div>
+            <span class="text-slate-500 shrink-0 hidden md:inline" x-text="'since ' + (issue.first_seen || '')"></span>
+          </div>
+        </template>
+        <template x-if="pipeline.resolved.length > 0">
+          <div class="pt-2 text-[11px] font-mono text-slate-500">
+            <span>Recently resolved: </span>
+            <template x-for="r in pipeline.resolved" :key="r.key">
+              <span class="mr-3"><span class="text-emerald-400">✓</span> <span x-text="r.category + ' ' + r.entity"></span></span>
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <!-- Collectors table -->
+      <div x-show="pipelineView === 'agents'" class="mt-4 overflow-x-auto">
+        <table class="w-full text-left text-xs font-mono">
+          <thead>
+            <tr class="border-b border-white/10 text-slate-400 uppercase tracking-wider text-[11px]">
+              <th class="py-2 px-3">Collector</th>
+              <th class="py-2 px-3">Configuration</th>
+              <th class="py-2 px-3">State</th>
+              <th class="py-2 px-3 text-right">Source In</th>
+              <th class="py-2 px-3 text-right">To SecOps</th>
+              <th class="py-2 px-3 text-right">Loss</th>
+              <th class="py-2 px-3">Version</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="a in pipeline.agents" :key="a.id">
+              <tr class="border-b border-white/5 hover:bg-white/5">
+                <td class="py-2 px-3">
+                  <span class="inline-block w-2 h-2 rounded-full mr-2"
+                        :class="{ 'bg-rose-500': a.health === 'critical', 'bg-amber-400': a.health === 'warning', 'bg-sky-400': a.health === 'info', 'bg-emerald-400': a.health === 'ok' }"></span>
+                  <span class="text-white" x-text="a.name"></span>
+                </td>
+                <td class="py-2 px-3 text-slate-300" x-text="a.configuration"></td>
+                <td class="py-2 px-3" :class="a.connected ? 'text-emerald-300' : 'text-rose-300'"
+                    x-text="a.connected ? 'connected' : 'disconnected'"></td>
+                <td class="py-2 px-3 text-right text-slate-300" x-text="formatBps(a.source_bps)"></td>
+                <td class="py-2 px-3 text-right text-slate-300" x-text="formatBps(a.dest_bps)"></td>
+                <td class="py-2 px-3 text-right"
+                    :class="(a.loss_pct ?? 0) >= 20 ? 'text-rose-300' : 'text-slate-400'"
+                    x-text="a.loss_pct === null || a.loss_pct === undefined ? '—' : a.loss_pct + '%'"></td>
+                <td class="py-2 px-3" :class="a.out_of_date ? 'text-amber-300' : 'text-slate-400'"
+                    x-text="(a.version || '') + (a.out_of_date ? ' ↑' : '')"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p x-show="pipeline.agents.length === 0" class="text-xs font-mono text-slate-500 mt-2">No collector data.</p>
+      </div>
+
+      <!-- Delivery reconciliation (BindPlane sent vs SecOps received, per log type) -->
+      <div x-show="pipelineView === 'delivery'" class="mt-4 overflow-x-auto">
+        <p class="text-[11px] font-mono text-slate-400 mb-2">
+          Ratio = SecOps bytes received / BindPlane bytes sent. Byte accounting differs between systems, so each
+          log type is judged against its own 24h ratio and the fleet median
+          (<span class="text-slate-200" x-text="pipeline.fleetRatio ?? '—'"></span>), not 1.0.
+          <span x-show="pipeline.deliveryInfo.recent_window"
+                x-text="'Recent SecOps window: ' + (pipeline.deliveryInfo.recent_window || []).join(' → ')"></span>
+        </p>
+        <table class="w-full text-left text-xs font-mono">
+          <thead>
+            <tr class="border-b border-white/10 text-slate-400 uppercase tracking-wider text-[11px]">
+              <th class="py-2 px-3">Log Type</th>
+              <th class="py-2 px-3">Status</th>
+              <th class="py-2 px-3 text-right">BindPlane 1h</th>
+              <th class="py-2 px-3 text-right">SecOps 1h</th>
+              <th class="py-2 px-3 text-right">Ratio 1h</th>
+              <th class="py-2 px-3 text-right">Ratio 24h</th>
+              <th class="py-2 px-3 text-right">Change</th>
+              <th class="py-2 px-3">Top Collector (24h)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="d in pipeline.delivery" :key="d.group">
+              <tr class="border-b border-white/5 hover:bg-white/5">
+                <td class="py-2 px-3 text-white" x-text="d.group"></td>
+                <td class="py-2 px-3">
+                  <span class="px-1.5 py-0.5 rounded border text-[10px] uppercase"
+                        :class="severityClasses(deliverySeverity(d.status))" x-text="d.status"></span>
+                </td>
+                <td class="py-2 px-3 text-right text-slate-300" x-text="formatBytes(d.bindplane_bytes_recent)"></td>
+                <td class="py-2 px-3 text-right text-slate-300" x-text="formatBytes(d.secops_bytes_recent)"></td>
+                <td class="py-2 px-3 text-right text-slate-300" x-text="d.ratio_recent ?? '—'"></td>
+                <td class="py-2 px-3 text-right text-slate-300" x-text="d.ratio_baseline ?? '—'"></td>
+                <td class="py-2 px-3 text-right"
+                    :class="(d.ratio_change_pct ?? 0) <= -50 ? 'text-rose-300' : 'text-slate-400'"
+                    x-text="d.ratio_change_pct === null || d.ratio_change_pct === undefined ? '—' : (d.ratio_change_pct > 0 ? '+' : '') + d.ratio_change_pct + '%'"></td>
+                <td class="py-2 px-3 text-slate-400"
+                    x-text="(d.top_agents_baseline && d.top_agents_baseline.length) ? d.top_agents_baseline[0].agent + ' (' + d.top_agents_baseline[0].share_pct + '%)' : '—'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p x-show="!pipeline.deliveryInfo.available" class="text-xs font-mono text-slate-500 mt-2">
+          Delivery reconciliation needs both BindPlane and SecOps telemetry.
+        </p>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
     <!-- BENTO ROW 1: CORE TELEMETRY KPIS (4 ASYMMETRIC BENTO TILES)                -->
     <!-- ========================================================================= -->
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -408,6 +578,16 @@
         
         <!-- Tab Bar -->
         <div class="flex items-center gap-2 overflow-x-auto">
+          <button class="bento-tab-btn" :class="{ 'active': activeTab === 'unified' }" @click="setTab('unified')">
+            <svg class="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 6h6M14 6h6M4 12h16M4 18h6M14 18h6"/>
+            </svg>
+            Unified View
+            <span class="text-xs px-2 py-0.5 rounded-full font-mono whitespace-nowrap"
+                  :class="unifiedCounts.issues > 0 ? 'bg-rose-500/20 text-rose-300' : 'bg-white/10'"
+                  x-text="unifiedCounts.issues > 0 ? unifiedCounts.issues + ' issues' : unifiedCounts.total"></span>
+          </button>
+
           <button class="bento-tab-btn" :class="{ 'active': activeTab === 'sources' }" @click="setTab('sources')">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="8" y1="6" x2="21" y2="6"/>
@@ -483,6 +663,160 @@
           </div>
         </div>
 
+      </div>
+
+      <!-- TAB 0: Unified View (BindPlane | Delivery | SecOps per log type) -->
+      <div x-show="activeTab === 'unified'" class="mt-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3">
+          <p class="text-[11px] font-mono text-slate-400">
+            One row per log type. <span class="text-cyan-300">BindPlane</span> = collector-side throughput,
+            <span class="text-emerald-300">SecOps</span> = Cloud Monitoring ingestion. "Recent" = last hour
+            (SecOps window lagged 30 min). Click a row for per-collector detail.
+          </p>
+          <div class="flex items-center gap-2 text-xs font-mono">
+            <input type="text" x-model="unifiedSearch" placeholder="Log type, collector, path..."
+                   class="cyber-input px-3 text-xs w-52 font-mono">
+            <div class="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+              <button class="px-2 py-1 rounded-lg transition"
+                      :class="unifiedFilter === 'all' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-white'"
+                      @click="unifiedFilter = 'all'" x-text="'All ' + unifiedCounts.total"></button>
+              <button class="px-2 py-1 rounded-lg transition"
+                      :class="unifiedFilter === 'issues' ? 'bg-rose-500/20 text-rose-300 font-bold' : 'text-slate-400 hover:text-white'"
+                      @click="unifiedFilter = 'issues'" x-text="'Issues ' + unifiedCounts.issues"></button>
+              <button class="px-2 py-1 rounded-lg transition"
+                      :class="unifiedFilter === 'bindplane' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-white'"
+                      @click="unifiedFilter = 'bindplane'" x-text="'BindPlane ' + unifiedCounts.bindplane"></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs font-mono">
+            <thead>
+              <tr class="text-[10px] uppercase tracking-wider">
+                <th class="py-1 px-3" colspan="2"></th>
+                <th class="py-1 px-3 text-center text-cyan-300 border-b border-cyan-500/40" colspan="3">BindPlane</th>
+                <th class="py-1 px-3 text-center text-amber-300 border-b border-amber-500/40" colspan="2">Delivery</th>
+                <th class="py-1 px-3 text-center text-emerald-300 border-b border-emerald-500/40" colspan="4">SecOps · Cloud Monitoring</th>
+              </tr>
+              <tr class="border-b border-white/10 text-slate-400 uppercase tracking-wider text-[11px] whitespace-nowrap">
+                <th class="py-2 px-3">Log Type</th>
+                <th class="py-2 px-3">Path</th>
+                <th class="py-2 px-3 text-right">Collectors</th>
+                <th class="py-2 px-3 text-right">Sent 1h</th>
+                <th class="py-2 px-3">Status</th>
+                <th class="py-2 px-3 text-right">Ratio</th>
+                <th class="py-2 px-3">Status</th>
+                <th class="py-2 px-3 text-right">Received 1h</th>
+                <th class="py-2 px-3 text-right">24h</th>
+                <th class="py-2 px-3 text-right">UDM %</th>
+                <th class="py-2 px-3">Trend 24h</th>
+              </tr>
+            </thead>
+            <template x-for="r in filteredUnified" :key="r.key">
+              <tbody class="border-b border-white/5">
+                <tr class="hover:bg-white/5 cursor-pointer whitespace-nowrap" @click="toggleUnified(r.key)">
+                  <td class="py-2 px-3">
+                    <span class="inline-block w-2 h-2 rounded-full mr-2"
+                          :class="{ 'bg-rose-500': r.status === 'critical', 'bg-amber-400': r.status === 'warning', 'bg-emerald-400': r.status === 'ok' }"></span>
+                    <span class="text-slate-500 mr-1" x-text="unifiedExpanded[r.key] ? '▾' : '▸'"></span>
+                    <span class="text-white" x-text="r.label"></span>
+                  </td>
+                  <td class="py-2 px-3">
+                    <template x-for="p in r.paths" :key="p">
+                      <span class="px-1.5 py-0.5 mr-1 rounded border text-[10px]" :class="pathClasses(p)" x-text="p"></span>
+                    </template>
+                  </td>
+                  <!-- BindPlane -->
+                  <td class="py-2 px-3 text-right text-slate-300"
+                      x-text="r.bindplane ? r.bindplane.collector_count + (r.bindplane.silent_collectors ? ' (' + r.bindplane.silent_collectors + ' silent)' : '') : '—'"></td>
+                  <td class="py-2 px-3 text-right text-slate-300" x-text="r.bindplane ? formatBytes(r.bindplane.sent_bytes_recent) : '—'"></td>
+                  <td class="py-2 px-3">
+                    <span x-show="r.bindplane" class="px-1.5 py-0.5 rounded border text-[10px] uppercase"
+                          :class="severityClasses(r.bindplane?.status)" x-text="r.bindplane?.status"></span>
+                    <span x-show="!r.bindplane" class="text-slate-600">—</span>
+                  </td>
+                  <!-- Delivery -->
+                  <td class="py-2 px-3 text-right text-slate-300" x-text="r.delivery?.ratio_recent ?? '—'"></td>
+                  <td class="py-2 px-3">
+                    <span x-show="r.delivery" class="px-1.5 py-0.5 rounded border text-[10px] uppercase"
+                          :class="severityClasses(deliverySeverity(r.delivery?.status))" x-text="r.delivery?.status"></span>
+                    <span x-show="!r.delivery" class="text-slate-600">—</span>
+                  </td>
+                  <!-- SecOps -->
+                  <td class="py-2 px-3 text-right text-slate-300" x-text="formatBytes(r.secops.received_bytes_recent)"></td>
+                  <td class="py-2 px-3 text-right text-slate-300" x-text="formatBytes(r.secops.bytes_24h)"></td>
+                  <td class="py-2 px-3 text-right"
+                      :class="(r.secops.normalization_rate_pct ?? 100) < 95 ? 'text-amber-300' : 'text-slate-300'"
+                      x-text="r.secops.normalization_rate_pct === null ? '—' : r.secops.normalization_rate_pct + '%'"></td>
+                  <td class="py-2 px-3">
+                    <svg width="120" height="24" class="block">
+                      <polyline fill="none" stroke-width="1.5"
+                                :stroke="r.status === 'critical' ? '#fb7185' : (r.status === 'warning' ? '#fbbf24' : '#34d399')"
+                                :points="sparkPoints(r.secops.sparkline)"></polyline>
+                    </svg>
+                  </td>
+                </tr>
+
+                <!-- Drill-down -->
+                <tr x-show="unifiedExpanded[r.key]" class="bg-white/[0.02]">
+                  <td colspan="11" class="px-6 py-3">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      <div>
+                        <div class="text-[10px] uppercase tracking-wider text-cyan-300 mb-1">BindPlane collectors</div>
+                        <template x-if="!r.bindplane">
+                          <div class="text-slate-500">Not collected via BindPlane.</div>
+                        </template>
+                        <template x-for="c in (r.bindplane?.collectors || [])" :key="c.name">
+                          <div class="flex items-center justify-between gap-2 py-0.5">
+                            <span>
+                              <span class="inline-block w-1.5 h-1.5 rounded-full mr-1"
+                                    :class="{ 'bg-rose-500': c.health === 'critical', 'bg-amber-400': c.health === 'warning', 'bg-sky-400': c.health === 'info', 'bg-emerald-400': c.health === 'ok' }"></span>
+                              <span class="text-white" x-text="c.name"></span>
+                              <span class="text-slate-500" x-text="c.configuration"></span>
+                            </span>
+                            <span class="text-slate-300" x-text="formatBps(c.bps_recent) + ' · ' + c.share_24h_pct + '% of 24h'"></span>
+                          </div>
+                        </template>
+                      </div>
+                      <div>
+                        <div class="text-[10px] uppercase tracking-wider text-emerald-300 mb-1">SecOps by log type / path (24h)</div>
+                        <template x-for="lt in r.secops.per_log_type" :key="lt.log_type">
+                          <div class="flex justify-between py-0.5">
+                            <span class="text-white" x-text="lt.log_type"></span>
+                            <span class="text-slate-300"
+                                  x-text="formatBytes(lt.bytes_24h) + ' · ' + formatNumber(lt.records_24h) + ' rec · ' + (lt.normalization_rate_pct ?? '—') + '% UDM'"></span>
+                          </div>
+                        </template>
+                        <template x-for="pv in Object.entries(r.secops.paths_bytes_24h)" :key="pv[0]">
+                          <div class="flex justify-between py-0.5 text-slate-400">
+                            <span x-text="'via ' + pv[0]"></span><span x-text="formatBytes(pv[1])"></span>
+                          </div>
+                        </template>
+                        <div x-show="r.delivery" class="mt-1 text-slate-400"
+                             x-text="'Ratio 1h ' + (r.delivery?.ratio_recent ?? '—') + ' vs 24h ' + (r.delivery?.ratio_baseline ?? '—') + (r.delivery?.ratio_change_pct != null ? ' (' + (r.delivery.ratio_change_pct > 0 ? '+' : '') + r.delivery.ratio_change_pct + '%)' : '')"></div>
+                      </div>
+                      <div>
+                        <div class="text-[10px] uppercase tracking-wider text-rose-300 mb-1">Issues</div>
+                        <template x-if="r.issues.length === 0">
+                          <div class="text-emerald-300">None.</div>
+                        </template>
+                        <template x-for="(i, idx) in r.issues" :key="idx">
+                          <div class="mb-1 px-2 py-1 rounded border" :class="severityClasses(i.severity)">
+                            <div class="font-semibold" x-text="i.category"></div>
+                            <div class="text-slate-200" x-text="i.message"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </template>
+          </table>
+          <p x-show="pipeline.loaded && filteredUnified.length === 0" class="text-xs font-mono text-slate-500 mt-3">No matching log types.</p>
+          <p x-show="!pipeline.loaded" class="text-xs font-mono text-slate-500 mt-3">Loading pipeline data…</p>
+        </div>
       </div>
 
       <!-- TAB 1: Log Sources Explorer -->

@@ -7,7 +7,7 @@ import io
 import csv
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 
 from flask import Flask, render_template, request, jsonify, Response, send_file
 
@@ -31,6 +31,32 @@ from secops_ingestion.security import (
     safe_filename_component,
     csv_safe,
 )
+from secops_ingestion.bindplane import (
+    BindPlaneClient,
+    BindPlaneError,
+    MockBindPlaneClient,
+    ALLOWED_PERIODS as BINDPLANE_PERIODS,
+)
+from secops_ingestion.delivery import (
+    DEFAULT_BINDPLANE_COLLECTOR_IDS,
+    bindplane_bytes_by_group,
+    detect_idle_sources,
+    evaluate_delivery,
+    map_sources,
+    recent_window,
+    secops_bytes_by_log_type,
+)
+from secops_ingestion.unified import build_unified_rows
+from secops_ingestion.pipeline_health import (
+    Issue,
+    IssueTracker,
+    Thresholds,
+    SEVERITY_CRITICAL,
+    count_by_severity,
+    evaluate_bindplane,
+    evaluate_secops_parsing,
+    evaluate_secops_silence,
+)
 
 app = Flask(__name__)
 app.config["SECOPS_PROJECT_ID"] = os.environ.get("SECOPS_PROJECT_ID", DEFAULT_PROJECT_ID)
@@ -53,6 +79,53 @@ _query_limiter = RateLimiter(limit=120, window_seconds=60)
 
 # In-memory cache for fast UI interaction
 _cache: Dict[str, Any] = {}
+
+# Pipeline health: short TTL so outages surface within about a minute.
+PIPELINE_CACHE_SECONDS = 60
+_pipeline_cache: Dict[str, Any] = {}
+# One tracker per window so switching windows doesn't flap first_seen/resolved.
+_issue_trackers: Dict[str, IssueTracker] = {}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def load_thresholds() -> Thresholds:
+    """Detection thresholds, overridable via environment."""
+    return Thresholds(
+        silent_bytes_per_sec=_env_float("PIPELINE_SILENT_BPS", 0.0),
+        drop_warn_pct=_env_float("PIPELINE_DROP_WARN_PCT", 20.0),
+        drop_crit_pct=_env_float("PIPELINE_DROP_CRIT_PCT", 50.0),
+        drop_min_input_bytes_per_sec=_env_float("PIPELINE_DROP_MIN_INPUT_BPS", 100.0),
+        secops_silent_after_minutes=int(_env_float("SECOPS_SILENT_AFTER_MINUTES", 90)),
+        secops_cadence_multiplier=_env_float("SECOPS_SILENT_CADENCE_MULTIPLIER", 3.0),
+        secops_min_buckets_for_cadence=int(_env_float("SECOPS_SILENT_MIN_BUCKETS", 4)),
+        secops_silent_ignore=tuple(
+            s.strip() for s in os.environ.get("SECOPS_SILENT_IGNORE_LOG_TYPES", "").split(",") if s.strip()
+        ),
+        delivery_gap_warn_pct=_env_float("DELIVERY_GAP_WARN_PCT", 50.0),
+        delivery_gap_crit_pct=_env_float("DELIVERY_GAP_CRIT_PCT", 80.0),
+        delivery_min_bytes=_env_float("DELIVERY_MIN_BYTES", 1_000_000.0),
+        delivery_baseline_outlier_pct=_env_float("DELIVERY_BASELINE_OUTLIER_PCT", 75.0),
+    )
+
+
+def bindplane_collector_ids() -> Tuple[str, ...]:
+    """SecOps collector_id(s) that identify BindPlane traffic (env-overridable)."""
+    raw = os.environ.get("BINDPLANE_SECOPS_COLLECTOR_IDS", "")
+    ids = tuple(x.strip() for x in raw.split(",") if x.strip())
+    return ids or DEFAULT_BINDPLANE_COLLECTOR_IDS
+
+
+def get_bindplane_client():
+    """Mock client in mock mode, otherwise env-configured client (or None)."""
+    if app.config.get("MOCK_MODE", False):
+        return MockBindPlaneClient()
+    return BindPlaneClient.from_env()
 
 
 def resolve_period(raw: str) -> str:
@@ -78,13 +151,23 @@ def get_client() -> SecOpsMonitoringClient:
 
 def fetch_period_summary(period_key: str, force_reload: bool = False):
     """Fetches and calculates summary for 'daily', 'weekly', 'monthly', or 'yearly' (12 months)."""
+    return _load_period(period_key, force_reload)["summary"]
+
+
+def fetch_period_raw(period_key: str) -> Dict[str, Any]:
+    """Return the raw Cloud Monitoring series behind a period summary (cached)."""
+    return _load_period(period_key)["raw"]
+
+
+def _load_period(period_key: str, force_reload: bool = False) -> Dict[str, Any]:
+    """Fetch, calculate, and cache {summary, raw, timestamp} for a period."""
     cache_key = f"{app.config['SECOPS_PROJECT_ID']}_{period_key}_{app.config.get('MOCK_MODE', False)}"
     cached = _cache.get(cache_key)
     now = datetime.now(timezone.utc)
 
     # Cache valid for 3 minutes unless force_reload is requested
     if not force_reload and cached and (now - cached["timestamp"]).total_seconds() < 180:
-        return cached["summary"]
+        return cached
 
     client = get_client()
     days, alignment, title = PERIOD_CONFIGS.get(
@@ -107,11 +190,13 @@ def fetch_period_summary(period_key: str, force_reload: bool = False):
         end_time=end_time,
     )
 
-    _cache[cache_key] = {
+    entry = {
         "timestamp": now,
         "summary": summary,
+        "raw": raw_metrics,
     }
-    return summary
+    _cache[cache_key] = entry
+    return entry
 
 
 @app.errorhandler(MonitoringAuthError)
@@ -210,6 +295,9 @@ def api_settings():
         }), 400
 
     _cache.clear()
+    _pipeline_cache.clear()
+    # Project/mode changed: prior issue history no longer describes this target.
+    _issue_trackers.clear()
     return jsonify({
         "success": True,
         "project_id": redact_project_id(app.config["SECOPS_PROJECT_ID"]),
@@ -222,6 +310,7 @@ def api_settings():
 def api_refresh():
     """Clears cached metrics and forces reload."""
     _cache.clear()
+    _pipeline_cache.clear()
     return jsonify({"success": True, "message": "Cache invalidated."})
 
 
@@ -330,6 +419,161 @@ def api_bigquery_compat():
         "replacement_api": "Cloud Monitoring API v3 (projects.timeSeries.list)",
         "rows": bq_rows,
     })
+
+
+def build_pipeline_health(window: str) -> Dict[str, Any]:
+    """
+    Assemble BindPlane + SecOps issues into one report.
+
+    Each upstream is isolated: a BindPlane or Cloud Monitoring failure becomes a
+    critical issue in the report rather than failing the whole response, so one
+    outage can never hide the other system's problems.
+    """
+    now = datetime.now(timezone.utc)
+    thresholds = load_thresholds()
+    issues = []
+    agents_table = []
+    delivery_rows = []
+    bindplane_info: Dict[str, Any] = {"configured": False}
+    bp_data: Optional[Dict[str, Any]] = None
+
+    bp = get_bindplane_client()
+    if bp is None:
+        bindplane_info["message"] = (
+            "BindPlane not configured. Set BINDPLANE_ACCOUNT_ID and BINDPLANE_API_KEY_FILE."
+        )
+    else:
+        bindplane_info = {"configured": True, "mock": isinstance(bp, MockBindPlaneClient)}
+        try:
+            agents = bp.list_agents()
+            configurations = bp.list_configurations()
+            agent_ids = [a.get("id", "") for a in agents]
+            metrics = bp.agent_throughput(agent_ids, period=window)
+            # Delivery always compares a 1h recent window against a 24h baseline.
+            metrics_1h = metrics if window == "1h" else bp.agent_throughput(agent_ids, period="1h")
+            metrics_24h = bp.agent_throughput(agent_ids, period="24h")
+            bp_data = {
+                "agents": agents, "configurations": configurations,
+                "metrics_1h": metrics_1h, "metrics_24h": metrics_24h,
+            }
+            bp_issues, agents_table = evaluate_bindplane(agents, configurations, metrics, thresholds)
+            issues.extend(bp_issues)
+            bindplane_info.update({
+                "agent_count": len(agents),
+                "connected_count": sum(1 for r in agents_table if r["connected"]),
+                "configuration_count": len(configurations),
+            })
+        except BindPlaneError as exc:
+            app.logger.error("BindPlane unavailable: %s", exc)
+            issues.append(Issue(
+                SEVERITY_CRITICAL, "BINDPLANE_API_UNAVAILABLE", "integration", "bindplane",
+                "BindPlane API could not be queried. Collector health is unknown.",
+                {"detail": str(exc)},
+            ))
+
+    secops_info: Dict[str, Any] = {"available": True}
+    secops_bytes_series = None
+    secops_log_types: list = []
+    secops_end = now
+    try:
+        raw = fetch_period_raw("daily")
+        daily = fetch_period_summary("daily")
+        secops_bytes_series = raw.get(METRIC_BYTES_COUNT, [])
+        secops_end = datetime.strptime(daily.end_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        issues.extend(evaluate_secops_silence(secops_bytes_series, now, thresholds))
+        secops_log_types = daily.log_types
+        issues.extend(evaluate_secops_parsing(daily.log_types))
+    except MonitoringAuthError as exc:
+        app.logger.error("Cloud Monitoring unavailable for pipeline health: %s", exc)
+        secops_info = {"available": False}
+        issues.append(Issue(
+            SEVERITY_CRITICAL, "SECOPS_TELEMETRY_UNAVAILABLE", "integration", "secops",
+            "SecOps ingestion metrics could not be read from Cloud Monitoring.",
+        ))
+
+    delivery_info: Dict[str, Any] = {"available": False}
+    collector_ids = bindplane_collector_ids()
+    since, until = recent_window(secops_end)
+    groups_recent: Dict[Any, Any] = {}
+    groups_baseline: Dict[Any, Any] = {}
+    if bp_data is not None:
+        sources = map_sources(bp_data["configurations"])
+        names = {a.get("id", ""): a.get("name") or a.get("hostname") or a.get("id", "")
+                 for a in bp_data["agents"]}
+        groups_recent = bindplane_bytes_by_group(bp_data["metrics_1h"], sources, 3600, names)
+        groups_baseline = bindplane_bytes_by_group(bp_data["metrics_24h"], sources, 86400, names)
+
+    if bp_data is not None and secops_bytes_series is not None:
+        delivery_issues, delivery_rows = evaluate_delivery(
+            bp_recent=groups_recent,
+            bp_baseline=groups_baseline,
+            secops_recent=secops_bytes_by_log_type(secops_bytes_series, collector_ids, since, until),
+            secops_baseline=secops_bytes_by_log_type(secops_bytes_series, collector_ids, until=until),
+            thresholds=thresholds,
+        )
+        issues.extend(delivery_issues)
+        issues.extend(detect_idle_sources(bp_data["agents"], sources, bp_data["metrics_24h"]))
+        delivery_info = {
+            "available": True,
+            "secops_collector_ids": list(collector_ids),
+            "mapped_sources": len(sources),
+            "recent_window": [since.strftime("%Y-%m-%dT%H:%M:%SZ"), until.strftime("%Y-%m-%dT%H:%M:%SZ")],
+        }
+
+    tracker = _issue_trackers.setdefault(window, IssueTracker())
+    active, resolved = tracker.update(issues, now)
+
+    unified_rows = build_unified_rows(
+        groups_recent=groups_recent,
+        groups_baseline=groups_baseline,
+        delivery_rows=delivery_rows,
+        secops_bytes_series=secops_bytes_series or [],
+        secops_log_types=secops_log_types,
+        agents_table=agents_table,
+        issues=active,
+        bindplane_collector_ids=collector_ids,
+        recent_since=since,
+        recent_until=until,
+    )
+    return {
+        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "window": window,
+        "counts": count_by_severity(active),
+        "issues": [i.to_dict() for i in active],
+        "recently_resolved": [i.to_dict() for i in resolved],
+        "agents": agents_table,
+        "delivery": delivery_rows,
+        "delivery_info": delivery_info,
+        "unified": unified_rows,
+        "bindplane": bindplane_info,
+        "secops": secops_info,
+        "thresholds": {
+            "drop_warn_pct": thresholds.drop_warn_pct,
+            "drop_crit_pct": thresholds.drop_crit_pct,
+            "secops_silent_after_minutes": thresholds.secops_silent_after_minutes,
+            "delivery_gap_warn_pct": thresholds.delivery_gap_warn_pct,
+            "delivery_gap_crit_pct": thresholds.delivery_gap_crit_pct,
+        },
+    }
+
+
+@app.route("/api/pipeline/health")
+@rate_limit(_query_limiter)
+def api_pipeline_health():
+    """Collector + ingestion issues for the Pipeline Health panel."""
+    window = request.args.get("window", "1h")
+    if window not in BINDPLANE_PERIODS:
+        window = "1h"
+
+    cache_key = f"{window}_{app.config.get('MOCK_MODE', False)}"
+    cached = _pipeline_cache.get(cache_key)
+    now = datetime.now(timezone.utc)
+    if cached and (now - cached["timestamp"]).total_seconds() < PIPELINE_CACHE_SECONDS:
+        return jsonify(cached["report"])
+
+    report = build_pipeline_health(window)
+    _pipeline_cache[cache_key] = {"timestamp": now, "report": report}
+    return jsonify(report)
 
 
 # POST-only: as a GET this was triggerable by any crawler or link-preview bot,
@@ -468,6 +712,7 @@ if __name__ == "__main__":
         app.config["SSL_KEY_PATH"] = k_path
         print(f"🔒 SSL/TLS Enabled (Cert: {c_path}, Key: {k_path})")
 
-    print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://localhost:{port}")
-    app.run(host="0.0.0.0", port=port, debug=False, ssl_context=ssl_context)
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://{host}:{port}")
+    app.run(host=host, port=port, debug=False, ssl_context=ssl_context)
 
