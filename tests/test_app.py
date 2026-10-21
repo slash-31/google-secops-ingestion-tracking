@@ -268,6 +268,42 @@ class TestAppEndpoints(unittest.TestCase):
         finally:
             os.environ.pop("CRON_SECRET", None)
 
+    def test_load_dotenv_file(self):
+        import os
+        import tempfile
+        from secops_ingestion.config import load_dotenv_file
+
+        dotenv_content = (
+            "# Comment line\n"
+            "SECOPS_TEST_KEY_1=\"quoted_val_1\"\n"
+            "export SECOPS_TEST_KEY_2='single_quoted_2'\n"
+            "SECOPS_TEST_KEY_3=unquoted_val # inline comment\n"
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
+            fh.write(dotenv_content)
+            temp_path = fh.name
+
+        try:
+            os.environ.pop("SECOPS_TEST_KEY_1", None)
+            os.environ.pop("SECOPS_TEST_KEY_2", None)
+            os.environ["SECOPS_TEST_KEY_3"] = "already_set"
+
+            loaded = load_dotenv_file(dotenv_path=temp_path, override=False)
+            self.assertEqual(loaded["SECOPS_TEST_KEY_1"], "quoted_val_1")
+            self.assertEqual(os.environ.get("SECOPS_TEST_KEY_1"), "quoted_val_1")
+            self.assertEqual(os.environ.get("SECOPS_TEST_KEY_2"), "single_quoted_2")
+            # Existing env var is preserved when override=False
+            self.assertEqual(os.environ.get("SECOPS_TEST_KEY_3"), "already_set")
+
+            # override=True replaces existing env var
+            load_dotenv_file(dotenv_path=temp_path, override=True)
+            self.assertEqual(os.environ.get("SECOPS_TEST_KEY_3"), "unquoted_val")
+        finally:
+            os.environ.pop("SECOPS_TEST_KEY_1", None)
+            os.environ.pop("SECOPS_TEST_KEY_2", None)
+            os.environ.pop("SECOPS_TEST_KEY_3", None)
+            os.unlink(temp_path)
+
 
 if __name__ == "__main__":
     unittest.main()

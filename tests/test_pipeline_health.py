@@ -84,7 +84,7 @@ class TestEvaluateBindPlane(unittest.TestCase):
         self.assertFalse(rows[0]["connected"])
 
     def test_connected_agent_with_zero_throughput_is_silent(self):
-        # Mirrors the real Argolis agent: connected, every node at 0 B/s.
+        # Connected collector where every node reports 0 B/s.
         issues, _ = evaluate_bindplane([agent(AGENT_A)], [], pipeline(AGENT_A, [0.0, 0.0, 0.0], 0.0))
         self.assertEqual(categories(issues), ["AGENT_SILENT"])
         self.assertEqual(issues[0].evidence["reason"], "zero destination throughput")
@@ -177,7 +177,7 @@ class TestSecOpsRules(unittest.TestCase):
         self.assertEqual(issues[0].evidence["threshold_minutes"], 90)
 
     def test_batch_feed_not_flagged_within_its_cadence(self):
-        # Mirrors GCP_*_CONTEXT in Argolis: snapshot every 4h, last one 6h ago.
+        # Periodic context feed: snapshot every 4h, last one 6h ago.
         data = [self.every("GCP_IAM_CONTEXT", 360, 240, 5)]
         self.assertEqual(evaluate_secops_silence(data, self.NOW), [])
 

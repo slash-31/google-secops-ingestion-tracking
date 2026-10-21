@@ -12,7 +12,7 @@ Description: Compares what BindPlane collectors report sending against what
 Why ratios, not equality
 ------------------------
 BindPlane measures OTLP payload size (uncompressed, with attributes); SecOps
-counts raw ingested bytes. In Argolis the two differ by roughly 3x. Absolute
+counts raw ingested bytes. In production deployments the two typically differ by roughly 3x. Absolute
 comparison is meaningless, so each log-type group is judged against its own
 24h SecOps/BindPlane ratio. A sharp drop in the recent ratio means SecOps is
 receiving much less than usual relative to what BindPlane is sending.

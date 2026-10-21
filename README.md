@@ -1,162 +1,162 @@
-# Google SecOps Ingestion Intelligence (Script & Dashboard)
+# Google SecOps Ingestion Intelligence (CLI & Cyber Bento Dashboard)
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 
-A production-ready CLI script and interactive web dashboard to pull, calculate, reconcile, and visualize daily, weekly, monthly, and yearly ingestion telemetry from **Google SecOps (formerly Chronicle)** via the **Google Cloud Monitoring API** (`v3 projects.timeSeries.list`).
+A standalone CLI tool and interactive web dashboard that pulls, calculates, reconciles, and visualizes daily, weekly, monthly, and 12-month log ingestion telemetry from **Google SecOps (formerly Chronicle)** via the **Google Cloud Monitoring API v3** (`projects.timeSeries.list`), correlated side-by-side with **BindPlane Cloud** collector health and delivery ratios.
 
 ---
 
 ## 📑 Table of Contents
 
-- [Overview & Why This Exists](#-overview--why-this-exists)
-- [Key Capabilities](#-key-capabilities)
-- [Architecture & Metric Extraction](#-architecture--metric-extraction)
-- [Prerequisites & Dependencies (Zero Assumptions Guide)](#-prerequisites--dependencies-zero-assumptions-guide)
-- [IAM & Service Account Setup (Least Privilege)](#-iam--service-account-setup-least-privilege)
-  - [Step 1: Enable Cloud Monitoring API](#step-1-enable-cloud-monitoring-api)
-  - [Step 2: Create a Dedicated Service Account](#step-2-create-a-dedicated-service-account)
-  - [Step 3: Grant Least-Privilege IAM Roles](#step-3-grant-least-privilege-iam-roles)
-  - [Step 4: Provision Credentials](#step-4-provision-credentials)
-- [Environment Variables & Configuration](#-environment-variables--configuration)
-- [Installation & Quick Start](#-installation--quick-start)
-  - [Method 1: Local Python (Native)](#method-1-local-python-native)
-  - [Method 2: Docker Container](#method-2-docker-container)
-  - [Method 3: Docker Compose](#method-3-docker-compose)
-  - [Method 4: CLI Reporting & Exports](#method-4-cli-reporting--exports)
-- [Automated Telemetry Collection & Scheduling](#-automated-telemetry-collection--scheduling)
-- [REST API Reference](#-rest-api-reference)
-- [Testing & Quality Assurance](#-testing--quality-assurance)
-- [Security & Redaction](#-security--redaction)
-- [Release Notes & Changelog](#-release-notes--changelog)
+1. [Overview & Why This Exists](#-overview--why-this-exists)
+2. [Key Capabilities](#-key-capabilities)
+3. [Architecture & Data Flow](#-architecture--data-flow)
+4. [Prerequisites (Zero-Assumptions Checklist)](#-prerequisites-zero-assumptions-checklist)
+5. [Step-by-Step Credential & API Key Setup](#-step-by-step-credential--api-key-setup)
+   - [Part A: Google Cloud Service Account & IAM (Least Privilege)](#part-a-google-cloud-service-account--iam-least-privilege)
+   - [Part B: BindPlane Cloud Account ID & API Key (Optional)](#part-b-bindplane-cloud-account-id--api-key-optional)
+   - [Part C: Generating Application Security Tokens (`ADMIN_SECRET` & `CRON_SECRET`)](#part-c-generating-application-security-tokens-admin_secret--cron_secret)
+6. [Configuring Your `.env` File (No Secret Manager Required)](#-configuring-your-env-file-no-secret-manager-required)
+   - [Complete Environment Variable Reference](#complete-environment-variable-reference)
+7. [Installation & Running the Application](#-installation--running-the-application)
+   - [Method 1: Local Python (Native)](#method-1-local-python-native)
+   - [Method 2: Docker Container (`--env-file .env`)](#method-2-docker-container---env-file-env)
+   - [Method 3: Docker Compose (`env_file: .env`)](#method-3-docker-compose-env_file-env)
+   - [Method 4: CLI Reporting & File Exports](#method-4-cli-reporting--file-exports)
+8. [BindPlane Pipeline Health & Delivery Reconciliation](#-bindplane-pipeline-health--delivery-reconciliation)
+9. [Automated Telemetry Collection & Cron Scheduling](#-automated-telemetry-collection--cron-scheduling)
+10. [REST API Reference](#-rest-api-reference)
+11. [Testing & Quality Assurance](#-testing--quality-assurance)
+12. [Security & Redaction Controls](#-security--redaction-controls)
+13. [Release Notes & Changelog](#-release-notes--changelog)
 
 ---
 
 ## 💡 Overview & Why This Exists
 
-In May 2025, Google migrated historical SecOps ingestion telemetry away from legacy BigQuery exports (`datalake.ingestion_metrics`) to native **Google Cloud Monitoring API** time-series streams. 
+Google SecOps publishes ingestion telemetry directly to **Google Cloud Monitoring API v3** time-series streams (`chronicle.googleapis.com/*`), replacing the retired legacy BigQuery `datalake.ingestion_metrics` export.
 
-Security teams and detection engineers need visibility into:
-1. **Raw Volume**: How many gigabytes/terabytes of logs are received each day/month.
-2. **Parser Health**: How many raw records successfully normalize into Google SecOps Unified Data Model (UDM) events vs. fail due to parser syntax errors.
-3. **Rollup Reconciliation**: Reconciling fine-grained 30-minute metric buckets against whole-window rollup summaries to eliminate ingestion measurement discrepancies.
+Security operations teams and detection engineers need a single pane of glass to answer:
+1. **Raw Ingestion Volume**: How many gigabytes/terabytes of logs are ingested per log type (`PAN_FIREWALL`, `WINEVTLOG`, `LINUX_SYSMON`, `GCP_CLOUDAUDIT`, etc.) across 24h, 7d, 30d, and 12-month windows?
+2. **Parser Health & Normalization**: How many raw log lines normalize into Unified Data Model (UDM) events versus drop due to parser errors?
+3. **Collector & Delivery Health**: Are BindPlane collectors connected, are any sources silent or dropping events, and is Google SecOps actually receiving the bytes that BindPlane reports sending?
+4. **30-Minute Rollup Reconciliation**: How does the sum of 30-minute aligned buckets compare against full-window rollups (`max(sum_30m, rollup)`)?
 
-This project delivers a **complete, standalone monitoring suite**—including a CLI reporting tool, automated collector, and dark-themed web dashboard—with **zero mandatory infrastructure lock-in**.
+This project runs **anywhere** (laptop, Linux VM, Docker, or Cloud Run) and loads all configuration, API keys, secrets, and tokens directly from a local **`.env` file**—requiring **zero cloud secret managers or external databases**.
 
 ---
 
 ## 🌟 Key Capabilities
 
-- **Native Cloud Monitoring v3 Extraction**: Directly queries the `timeSeries.list` endpoint for:
-  - `chronicle.googleapis.com/ingestion/log/bytes_count` (Raw Ingestion Volume - Bytes, MB, GB, TB)
-  - `chronicle.googleapis.com/ingestion/log/record_count` (Raw Ingested Records / Log Lines)
+- **Unified Side-by-Side View (`BindPlane | Delivery | SecOps`)**: Joins BindPlane collector throughput, BindPlane-to-SecOps delivery ratios, and SecOps Cloud Monitoring ingestion/parsing metrics into one row per log type with expandable per-collector drill-downs and 24-hour sparklines.
+- **Native Cloud Monitoring v3 Extraction**: Queries `projects.timeSeries.list` for:
+  - `chronicle.googleapis.com/ingestion/log/bytes_count` (Raw Ingestion Bytes, MB, GB, TB)
+  - `chronicle.googleapis.com/ingestion/log/record_count` (Raw Ingested Log Records)
   - `chronicle.googleapis.com/normalizer/event/record_count` (Normalized UDM Events Produced)
-- **Flexible Timeframe Aggregations**:
+- **Multi-Horizon Timeframe Aggregations**:
   - **Daily**: Last 24 hours (30-minute alignment)
   - **Weekly**: Last 7 days (2-hour alignment)
   - **Monthly**: Last 30 days (6-hour alignment)
-  - **Yearly / 12 Months**: Last 365 days (24-hour alignment)
-- **Authoritative 30m Reconciliation**: Computes `max(sum_30m, rollup)` per log source to guarantee 100% accurate billing and ingestion tracking.
-- **Legacy BigQuery Compatibility**: Recreates the schema of the retired `datalake.ingestion_metrics` table on the fly for backwards compatibility with existing pipelines.
-- **Interactive Dark-Themed Web Dashboard**: Real-time KPI summary cards, volume share donut charts, time-series graphs, and searchable log-type tables.
-- **Offline / Mock Mode Engine**: Includes high-fidelity synthetic demo telemetry (simulating Palo Alto, Windows Sysmon, Linux Auditd, Meraki, GCP VPC Flow, AWS CloudTrail) allowing immediate testing without an active GCP project.
+  - **12 Months / Yearly**: Last 365 days (24-hour alignment)
+- **Authoritative 30m Reconciliation**: Computes `max(sum_30m, rollup)` per `(log_type, collector_id)` pair.
+- **Legacy BigQuery Schema Compatibility**: Formats metrics into the legacy `datalake.ingestion_metrics` table structure (`:RQ:` collector delimiter) for drop-in pipeline compatibility.
+- **Built-In Synthetic / Mock Mode (`MOCK_MODE=true`)**: Ships with a complete synthetic telemetry generator for both Google SecOps and BindPlane so you can evaluate or demo the dashboard immediately with zero credentials.
 
 ---
 
-## 📐 Architecture & Metric Extraction
+## 📐 Architecture & Data Flow
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Google SecOps                          │
-│         (Forwarders, Ingestion API, Cloud Feeds)            │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Streams telemetry
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│            Google Cloud Monitoring (Metrics API v3)         │
-│  - chronicle.googleapis.com/ingestion/log/bytes_count       │
-│  - chronicle.googleapis.com/ingestion/log/record_count      │
-│  - chronicle.googleapis.com/normalizer/event/record_count   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Authenticated API Query (OAuth2 / JWT)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│        SecOps Ingestion Intelligence Suite (This App)       │
-│                                                             │
-│   ┌─────────────────────┐       ┌───────────────────────┐   │
-│   │ CLI Tool (CLI/Cron) │       │ Flask REST App (UI)   │   │
-│   └──────────┬──────────┘       └───────────┬───────────┘   │
-│              │                              │               │
-│              ▼                              ▼               │
-│   ┌─────────────────────────────────────────────────────┐   │
-│   │            Reconciliation Engine                    │   │
-│   │   val = max(sum_30m_buckets, window_rollup)         │   │
-│   └─────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-The application queries the Cloud Monitoring API using the following pattern:
-```http
-GET https://monitoring.googleapis.com/v3/projects/{SECOPS_PROJECT_ID}/timeSeries?
-  filter=metric.type = "chronicle.googleapis.com/{metric_type}"
-  &aggregation.groupByFields=resource.labels.log_type, resource.labels.collector_id
-  &aggregation.crossSeriesReducer=REDUCE_NONE
-  &aggregation.perSeriesAligner=ALIGN_SUM
-  &aggregation.alignmentPeriod={alignment_seconds}s
-  &interval.startTime={RFC3339_START}
-  &interval.endTime={RFC3339_END}
+┌──────────────────────────────────┐       ┌──────────────────────────────────┐
+│         BindPlane Cloud          │       │          Google SecOps           │
+│  - /v1/agents                    │       │  (Forwarders, Feeds, Exporters)  │
+│  - /v1/configurations            │       └─────────────────┬────────────────┘
+│  - /v1/graphql (agentMetrics)    │                         │ Publishes metrics
+└─────────────────┬────────────────┘                         ▼
+                  │ HTTPS (API Key +              ┌──────────────────────────────────┐
+                  │        Account ID)            │ Google Cloud Monitoring API v3   │
+                  │                               │  - ingestion/log/bytes_count     │
+                  │                               │  - ingestion/log/record_count    │
+                  │                               │  - normalizer/event/record_count │
+                  │                               └──────────┬───────────────────────┘
+                  │                                          │ HTTPS (OAuth2 / SA Key)
+                  ▼                                          ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                 SecOps Ingestion Intelligence Suite (This App)               │
+│                 Configured via local `.env` file (No Secret Manager)         │
+│                                                                              │
+│  ┌──────────────────────┐  ┌──────────────────────┐  ┌────────────────────┐  │
+│  │ Unified & Delivery   │  │ 30m vs Rollup        │  │ CLI & CSV/JSON/MD  │  │
+│  │ Reconciliation Engine│  │ Calculator           │  │ Exporter           │  │
+│  └──────────────────────┘  └──────────────────────┘  └────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📦 Prerequisites & Dependencies (Zero Assumptions Guide)
+## 📦 Prerequisites (Zero-Assumptions Checklist)
 
-If you are setting this up for the first time, you need:
+Before installing, verify that you have the following tools installed on your machine. If you do not have them, follow the links provided:
 
-1. **A Google Cloud Platform (GCP) Project** where your Google SecOps instance is bound (referred to as `SECOPS_PROJECT_ID`).
-2. **Google Cloud CLI (`gcloud`)** installed on your administrative workstation ([Installation Guide](https://cloud.google.com/sdk/docs/install)).
-3. **Python 3.9+** (if running natively) OR **Docker 20.10+** (if running via containers).
-4. **Network Egress**: HTTPS outbound connectivity (TCP port 443) to `https://monitoring.googleapis.com`.
+1. **Git** (to clone this repository):
+   - Check if installed: `git --version`
+   - Install guide: [https://git-scm.com/downloads](https://git-scm.com/downloads)
+2. **Python 3.9 or newer** (if running natively without Docker) **OR Docker 20.10+** (if running in a container):
+   - Check Python: `python3 --version` ([Install Python](https://www.python.org/downloads/))
+   - Check Docker: `docker --version` ([Install Docker](https://docs.docker.com/get-docker/))
+3. **Google Cloud CLI (`gcloud`)** (used once during setup to create a read-only Service Account):
+   - Check if installed: `gcloud --version`
+   - Install guide: [https://cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)
+4. **A Google Cloud Project Bound to Google SecOps** (not required if you only want to run in `MOCK_MODE=true`):
+   - You will need the **GCP Project ID** (a lowercase string like `acme-secops-prod-123`, **not** the numeric project number).
+5. **Network Access**:
+   - Outbound HTTPS (TCP port `443`) to `https://monitoring.googleapis.com` and `https://oauth2.googleapis.com`.
+   - If using BindPlane integration: outbound HTTPS (TCP port `443`) to `https://app.bindplane.com` (or your self-hosted BindPlane URL).
 
 ---
 
-## 🔐 IAM & Service Account Setup (Least Privilege)
+## 🔐 Step-by-Step Credential & API Key Setup
 
-To pull metrics from Google Cloud Monitoring, the application needs an identity authorized to read monitoring data. Follow these step-by-step instructions to create a dedicated, least-privilege service account.
+> [!TIP]
+> **Want to test the app first without any credentials?**
+> Skip this section, copy `.env.example` to `.env`, set `MOCK_MODE="true"`, and jump straight to [Installation & Running the Application](#-installation--running-the-application).
 
-### Step 1: Enable Cloud Monitoring API
+---
 
-Ensure the Cloud Monitoring API is active on your SecOps Google Cloud project:
+### Part A: Google Cloud Service Account & IAM (Least Privilege)
+
+To read SecOps metrics from Google Cloud Monitoring, the application needs a read-only Google Cloud identity. Follow these steps in your terminal:
+
+#### Step 1: Log in to `gcloud` and set your SecOps GCP Project ID
+Replace `your-secops-project-id` with your actual GCP Project ID:
 
 ```bash
-gcloud services enable monitoring.googleapis.com \
-  --project="your-secops-project-id"
-```
-
-### Step 2: Create a Dedicated Service Account
-
-Create a workload-specific service account. Do **not** use default Compute Engine or App Engine service accounts:
-
-```bash
+gcloud auth login
 export SECOPS_PROJECT_ID="your-secops-project-id"
+gcloud config set project "${SECOPS_PROJECT_ID}"
+```
+
+#### Step 2: Enable the Google Cloud Monitoring API
+```bash
+gcloud services enable monitoring.googleapis.com --project="${SECOPS_PROJECT_ID}"
+```
+
+#### Step 3: Create a Dedicated Service Account
+```bash
 export SA_NAME="secops-ingest-monitor-sa"
 export SA_EMAIL="${SA_NAME}@${SECOPS_PROJECT_ID}.iam.gserviceaccount.com"
 
 gcloud iam service-accounts create "${SA_NAME}" \
   --project="${SECOPS_PROJECT_ID}" \
   --display-name="SecOps Ingestion Monitor Service Account" \
-  --description="Read-only identity for querying Chronicle ingestion metrics from Cloud Monitoring"
+  --description="Read-only service account for querying SecOps metrics from Cloud Monitoring"
 ```
 
-### Step 3: Grant Least-Privilege IAM Roles
-
-Grant **only** the `roles/monitoring.viewer` role to this service account on the target project. 
-
+#### Step 4: Grant Only `roles/monitoring.viewer` (Least Privilege)
 > [!IMPORTANT]
-> **Least Privilege Principle**:
-> - **DO NOT** grant primitive roles (`roles/viewer`, `roles/editor`, or `roles/owner`).
-> - `roles/monitoring.viewer` (`Monitoring Viewer`) grants read-only access to time series metrics, metric descriptors, and monitoring groups. It cannot read logs, modify alerts, or access underlying Cloud Storage / BigQuery data.
+> Do **not** grant `roles/owner`, `roles/editor`, or `roles/viewer`. The `roles/monitoring.viewer` role grants read-only access strictly to Cloud Monitoring time-series metrics.
 
 ```bash
 gcloud projects add-iam-policy-binding "${SECOPS_PROJECT_ID}" \
@@ -164,88 +164,179 @@ gcloud projects add-iam-policy-binding "${SECOPS_PROJECT_ID}" \
   --role="roles/monitoring.viewer"
 ```
 
-### Step 4: Provision Credentials
+#### Step 5: Download the Service Account JSON Key File (or use ADC)
+Choose **one** of the following methods to provide credentials to the app via `.env`:
 
-Depending on where you run the tool, select **one** of the following authentication strategies:
-
-#### Option A: Running on Google Cloud (Compute Engine, GKE, or Cloud Run) — *Recommended (Keyless)*
-Attach the service account directly to the VM or workload. The Google Cloud SDK and Python libraries will automatically fetch rotating OAuth2 JWT tokens from the internal metadata server (`http://metadata.google.internal`). No credential files or private keys are created or stored.
-
-- **Compute Engine VM**:
+- **Option A1 — Service Account JSON File (Standard for VMs, Docker, and Servers):**
+  Generate a JSON key file and restrict its permissions:
   ```bash
-  gcloud compute instances set-service-account INSTANCE_NAME \
-    --zone=ZONE \
-    --service-account="${SA_EMAIL}" \
-    --scopes="cloud-platform"
+  mkdir -p ~/.creds
+  gcloud iam service-accounts keys create ~/.creds/secops-sa.json \
+    --iam-account="${SA_EMAIL}" \
+    --project="${SECOPS_PROJECT_ID}"
+  chmod 600 ~/.creds/secops-sa.json
   ```
+  You will set `GOOGLE_APPLICATION_CREDENTIALS="/Users/yourname/.creds/secops-sa.json"` in your `.env` file.
 
-#### Option B: Running Outside GCP (On-Premises, Laptop, or External Cloud) — *Service Account Key*
-Generate a JSON credential key file:
+- **Option A2 — Short-Lived Bearer Token (`GCP_ACCESS_TOKEN`):**
+  If your organization blocks service account key creation (`constraints/iam.disableServiceAccountKeyCreation`), you can generate a temporary bearer token and place it in `.env`:
+  ```bash
+  gcloud auth print-access-token
+  ```
+  You will set `GCP_ACCESS_TOKEN="ya29.a0..."` in your `.env` file, or run `gcloud auth application-default login` and leave both `GOOGLE_APPLICATION_CREDENTIALS` and `GCP_ACCESS_TOKEN` empty in `.env`.
+
+---
+
+### Part B: BindPlane Cloud Account ID & API Key (Optional)
+
+If you use **BindPlane Cloud** (or a self-hosted BindPlane OPAMP server) to forward logs to Google SecOps, configuring BindPlane credentials in `.env` unlocks the **Unified by Log Type**, **Delivery Reconciliation**, **Pipeline Issues**, and **BindPlane Collectors** views.
+
+> [!NOTE]
+> BindPlane's API requires **both** your **Account ID** (`X-Bindplane-Account-ID`) and your **API Key** (`X-Bindplane-Api-Key`) on every request. An API key alone cannot auto-discover its project/account.
+
+1. **Find your `BINDPLANE_ACCOUNT_ID` (26-character ULID)**:
+   - Log in to [https://app.bindplane.com](https://app.bindplane.com).
+   - Click **Settings** (gear icon) or your **Project Name** in the top navigation bar.
+   - Copy the **Account ID / Project ID** (a 26-character uppercase alphanumeric ULID such as `01ARZ3NDEKTSV4RRFFQ69G5FAV`).
+2. **Generate your `BINDPLANE_API_KEY`**:
+   - In BindPlane, go to **Settings / Profile → API Keys** (or **Service Accounts**).
+   - Click **Create API Key**, give it a name (e.g., `secops-ingestion-dashboard`), and copy the generated key string.
+3. **Add both values to `.env`**:
+   - Set `BINDPLANE_ACCOUNT_ID="01XXXXXXXXXXXXXXXXXXXXXXXX"`
+   - Set `BINDPLANE_API_KEY="your-bindplane-api-key"` (or save the key in a local file with `chmod 600` and set `BINDPLANE_API_KEY_FILE="/path/to/bindplane-key.txt"` in `.env`).
+
+---
+
+### Part C: Generating Application Security Tokens (`ADMIN_SECRET` & `CRON_SECRET`)
+
+To prevent unauthorized callers or web crawlers from mutating settings or triggering expensive Cloud Monitoring API syncs, the application protects its `POST` endpoints using two tokens stored in `.env`:
+- `ADMIN_SECRET`: Required to call `POST /api/settings` and `POST /api/refresh`.
+- `CRON_SECRET`: Required to call `POST /api/collect`.
+
+Generate two random 32-byte hex tokens in your terminal:
 
 ```bash
-gcloud iam service-accounts keys create credentials.json \
-  --iam-account="${SA_EMAIL}" \
-  --project="${SECOPS_PROJECT_ID}"
+# Generate ADMIN_SECRET
+openssl rand -hex 32
+
+# Generate CRON_SECRET
+openssl rand -hex 32
+```
+
+Copy both outputs into your `.env` file.
+
+---
+
+## ⚙️ Configuring Your `.env` File (No Secret Manager Required)
+
+All configuration—including project IDs, credential paths, API keys, and security tokens—is managed through a single `.env` file in the root of this repository. **Both `app.py`, `secops_ingestion_cli.py`, and Gunicorn automatically load `.env` on startup.**
+
+### Step 1: Copy the included template
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+### Step 2: Edit `.env` with your values
+Open `.env` in any text editor (`nano .env`, `vim .env`, or VS Code) and replace the placeholders:
+
+```ini
+# ==============================================================================
+# 1. GOOGLE SECOPS / CLOUD MONITORING CONFIGURATION
+# ==============================================================================
+SECOPS_PROJECT_ID="your-secops-project-id"
+
+# Path to your Service Account JSON file (leave empty if using ADC or GCP_ACCESS_TOKEN)
+GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/credentials.json"
+
+# Optional: Short-lived OAuth2 bearer token (leave empty if using JSON key file above)
+GCP_ACCESS_TOKEN=""
+
+# Set to "true" for synthetic demo data, or "false" for live Google Cloud data
+MOCK_MODE="false"
+ALLOW_MOCK_FALLBACK="false"
+
+# ==============================================================================
+# 2. BINDPLANE CLOUD / OPAMP COLLECTOR TELEMETRY (OPTIONAL)
+# ==============================================================================
+# 26-character ULID from BindPlane Project Settings
+BINDPLANE_ACCOUNT_ID="01XXXXXXXXXXXXXXXXXXXXXXXX"
+
+# Raw BindPlane API key (or leave blank and use BINDPLANE_API_KEY_FILE below)
+BINDPLANE_API_KEY="bp_api_key_replace_with_your_actual_key"
+BINDPLANE_API_KEY_FILE=""
+
+BINDPLANE_BASE_URL="https://app.bindplane.com"
+BINDPLANE_SECOPS_COLLECTOR_IDS="aaaa1111-aaaa-1111-aaaa-1111aaaa1112"
+
+# ==============================================================================
+# 3. APPLICATION SECURITY TOKENS (ADMIN & CRON ENDPOINTS)
+# ==============================================================================
+# Generate each with: openssl rand -hex 32
+ADMIN_SECRET="replace-with-random-hex-token-from-openssl-rand-hex-32"
+CRON_SECRET="replace-with-random-hex-token-from-openssl-rand-hex-32"
+
+# ==============================================================================
+# 4. WEB SERVER & SSL/TLS SETTINGS
+# ==============================================================================
+HOST="0.0.0.0"
+PORT="8080"
+SSL_ENABLED="false"
+SSL_CERT_PATH="certs/cert.pem"
+SSL_KEY_PATH="certs/key.pem"
 ```
 
 > [!WARNING]
-> Keep `credentials.json` secure. Never commit it to git. The `.gitignore` file in this repository is already configured to block `*.json` credential files.
+> **Never commit `.env` to Git.** The `.gitignore` and `.dockerignore` files in this repository are pre-configured to ignore `.env`, `.env.*`, `credentials.json`, and `*.key` files while keeping `.env.example` tracked as a safe template.
 
-#### Option C: Local Developer Workstation (Application Default Credentials)
-If you already log in with your corporate Google identity via `gcloud`:
-
-```bash
-gcloud auth application-default login
-```
-
----
-
-## ⚙️ Environment Variables & Configuration
-
-The application can be fully configured via environment variables:
+### Complete Environment Variable Reference
 
 | Variable | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `SECOPS_PROJECT_ID` | `string` | `your-secops-project-id` | The GCP Project ID containing the SecOps Cloud Monitoring metrics. |
-| `GOOGLE_APPLICATION_CREDENTIALS` | `string` | *None* | Path to the service account JSON key file (required for Option B). |
-| `PORT` | `integer` | `8080` | Port on which the HTTP/HTTPS web server listens. |
-| `SSL_ENABLED` | `boolean` | `false` | Enables HTTPS termination directly in the application (`true`/`false`). |
-| `SSL_CERT_PATH` | `string` | `certs/cert.pem` | Path to public SSL certificate file (PEM format). |
-| `SSL_KEY_PATH` | `string` | `certs/key.pem` | Path to private SSL key file (PEM format). |
-| `MOCK_MODE` | `boolean` | `false` | When `true`, serves synthetic demo data without making GCP API calls. |
-| `HOST` | `string` | `0.0.0.0` | Bind address for `python3 app.py`. Use `127.0.0.1` for local-only development. |
-| `BINDPLANE_ACCOUNT_ID` | `string` | *None* | BindPlane Cloud **project** ID (26-char ULID). Enables the Pipeline Health panel. |
-| `BINDPLANE_API_KEY_FILE` | `string` | *None* | Path to a file containing the BindPlane API key (preferred over `BINDPLANE_API_KEY`). |
-| `BINDPLANE_API_KEY` | `string` | *None* | BindPlane API key passed directly. Avoid in shared shells; prefer the file variant. |
-| `BINDPLANE_BASE_URL` | `string` | `https://app.bindplane.com` | Override for self-hosted BindPlane Server. Must be `https://`. |
-| `PIPELINE_DROP_WARN_PCT` / `PIPELINE_DROP_CRIT_PCT` | `float` | `20` / `50` | Collector in-to-out loss percentage that raises a warning / critical. |
-| `PIPELINE_DROP_MIN_INPUT_BPS` | `float` | `100` | Ignore drop math for collectors receiving less than this many bytes/sec. |
-| `PIPELINE_SILENT_BPS` | `float` | `0` | Collector/source throughput at or below this is considered silent. |
-| `SECOPS_SILENT_AFTER_MINUTES` | `integer` | `90` | Minimum silence before a SecOps log type is flagged. |
-| `SECOPS_SILENT_CADENCE_MULTIPLIER` | `float` | `3` | Flag silence once the gap exceeds this multiple of the log type's normal arrival interval. |
-| `SECOPS_SILENT_MIN_BUCKETS` | `integer` | `4` | Minimum non-zero 30m buckets in 24h before a log type is evaluated. |
-| `SECOPS_SILENT_IGNORE_LOG_TYPES` | `csv` | *None* | Comma-separated log types never flagged as silent (e.g. known batch feeds). |
-| `BINDPLANE_SECOPS_COLLECTOR_IDS` | `csv` | `aaaa1111-aaaa-1111-aaaa-1111aaaa1112` | SecOps `collector_id`(s) that identify BindPlane traffic (observed fixed value for the Chronicle exporter). |
-| `DELIVERY_GAP_WARN_PCT` / `DELIVERY_GAP_CRIT_PCT` | `float` | `50` / `80` | Drop in the recent SecOps/BindPlane ratio vs its 24h baseline that raises a warning / critical. |
-| `DELIVERY_BASELINE_OUTLIER_PCT` | `float` | `75` | Flag a log type whose 24h ratio is this far below the fleet-median ratio. |
-| `DELIVERY_MIN_BYTES` | `float` | `1000000` | Ignore log-type groups with less BindPlane volume than this in a window. |
+| `SECOPS_PROJECT_ID` | `string` | `your-secops-project-id` | GCP Project ID where Google SecOps metrics are stored. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `string` | *None* | Path to the GCP Service Account JSON key file. |
+| `GCP_ACCESS_TOKEN` | `string` | *None* | Optional raw OAuth2 bearer token for Cloud Monitoring API. |
+| `MOCK_MODE` | `boolean` | `false` | When `true`, serves synthetic demo data without live API calls. |
+| `ALLOW_MOCK_FALLBACK` | `boolean` | `false` | When `false`, Cloud Monitoring auth/API failures return HTTP 503 instead of fabricating data. |
+| `BINDPLANE_ACCOUNT_ID` | `string` | *None* | BindPlane Cloud project/account ID (26-character ULID). |
+| `BINDPLANE_API_KEY` | `string` | *None* | BindPlane API key loaded directly from `.env`. |
+| `BINDPLANE_API_KEY_FILE` | `string` | *None* | Optional path to a file containing the BindPlane API key. |
+| `BINDPLANE_BASE_URL` | `string` | `https://app.bindplane.com` | BindPlane server base URL (`https://` required). |
+| `BINDPLANE_SECOPS_COLLECTOR_IDS` | `csv` | `aaaa1111-aaaa-1111-aaaa-1111aaaa1112` | SecOps `collector_id`(s) identifying BindPlane Chronicle exporter traffic. |
+| `ADMIN_SECRET` | `string` | *None* | Shared secret required for `POST /api/settings` and `POST /api/refresh`. |
+| `CRON_SECRET` | `string` | *None* | Shared secret required for `POST /api/collect`. |
+| `HOST` | `string` | `0.0.0.0` | Listen address (`127.0.0.1` for local-only access). |
+| `PORT` | `integer` | `8080` / `8443` | HTTP/HTTPS listener port. |
+| `SSL_ENABLED` | `boolean` | `false` | Enables direct HTTPS termination using `SSL_CERT_PATH` and `SSL_KEY_PATH`. |
+| `SSL_CERT_PATH` | `string` | `certs/cert.pem` | Path to PEM-encoded TLS certificate. |
+| `SSL_KEY_PATH` | `string` | `certs/key.pem` | Path to PEM-encoded TLS private key. |
+| `PIPELINE_DROP_WARN_PCT` / `PIPELINE_DROP_CRIT_PCT` | `float` | `20` / `50` | Collector source-to-destination drop % for warning / critical alerts. |
+| `PIPELINE_DROP_MIN_INPUT_BPS` | `float` | `100` | Minimum collector input bytes/sec before evaluating drop %. |
+| `PIPELINE_SILENT_BPS` | `float` | `0` | Throughput (B/s) at or below which a collector/source is flagged silent. |
+| `SECOPS_SILENT_AFTER_MINUTES` | `integer` | `90` | Floor in minutes before flagging a SecOps log type as silent. |
+| `SECOPS_SILENT_CADENCE_MULTIPLIER` | `float` | `3` | Multiplier of median arrival interval used for cadence-aware silence detection. |
+| `SECOPS_SILENT_MIN_BUCKETS` | `integer` | `4` | Minimum non-zero 30m buckets in 24h required to evaluate cadence. |
+| `SECOPS_SILENT_IGNORE_LOG_TYPES` | `csv` | *None* | Comma-separated log types excluded from silence alerts. |
+| `DELIVERY_GAP_WARN_PCT` / `DELIVERY_GAP_CRIT_PCT` | `float` | `50` / `80` | Recent vs. 24h SecOps/BindPlane ratio drop % for warning / critical alerts. |
+| `DELIVERY_BASELINE_OUTLIER_PCT` | `float` | `75` | 24h ratio outlier threshold below the fleet median ratio (%). |
+| `DELIVERY_MIN_BYTES` | `float` | `1000000` | Minimum BindPlane window bytes (`1 MB`) required to evaluate delivery ratios. |
 
 ---
 
-## 🚀 Installation & Quick Start
+## 🚀 Installation & Running the Application
 
 ### Method 1: Local Python (Native)
 
-1. **Clone the repository**:
+1. **Clone the repository and enter the directory**:
    ```bash
-   git clone https://github.com/your-username/google-secops-ingestion-tracking.git
+   git clone https://github.com/slash-31/google-secops-ingestion-tracking.git
    cd google-secops-ingestion-tracking
    ```
 
-2. **Create and activate a virtual environment**:
+2. **Create and activate a Python virtual environment**:
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate
+   python3 -m venv .venv
+   source .venv/bin/activate
    ```
 
 3. **Install dependencies**:
@@ -254,269 +345,215 @@ The application can be fully configured via environment variables:
    pip install -r requirements.txt
    ```
 
-4. **Launch the Web Dashboard**:
+4. **Create your `.env` file from the template**:
    ```bash
-   export SECOPS_PROJECT_ID="your-secops-project-id"
-   export GOOGLE_APPLICATION_CREDENTIALS="/path/to/credentials.json"
-   export PORT=8080
+   cp .env.example .env
+   chmod 600 .env
+   # Edit .env and fill in SECOPS_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS, BINDPLANE_*, etc.
+   ```
 
+5. **Start the Web Dashboard**:
+   ```bash
    python3 app.py
    ```
-   Open your browser to: `http://localhost:8080`
+   Open your browser to `http://localhost:8080` (or `https://localhost:443` if `SSL_ENABLED="true"`).
 
 ---
 
-### Method 2: Docker Container
+### Method 2: Docker Container (`--env-file .env`)
 
-1. **Build the container image**:
+1. **Build the Docker image**:
    ```bash
    docker build -t secops-ingestion:latest .
    ```
 
-2. **Run in Mock / Demo Mode (No GCP credentials required)**:
+2. **Option A — Run in Offline Mock / Demo Mode (No credentials needed)**:
    ```bash
    docker run -d --name secops-ingest-demo \
-     -p 8080:8080 \
+     -p 8443:8443 \
      -e MOCK_MODE=true \
      secops-ingestion:latest
    ```
+   Open `https://localhost:8443` in your browser.
 
-3. **Run in Live Mode with Service Account Key**:
+3. **Option B — Run in Live Production Mode using `.env`**:
+   Ensure your `.env` file has `GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json` and your `SECOPS_PROJECT_ID`, `BINDPLANE_ACCOUNT_ID`, `BINDPLANE_API_KEY`, `ADMIN_SECRET`, and `CRON_SECRET` populated, then run:
    ```bash
    docker run -d --name secops-ingest-prod \
-     -p 8080:8080 \
-     -v $(pwd)/credentials.json:/app/credentials.json:ro \
-     -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
-     -e SECOPS_PROJECT_ID="your-secops-project-id" \
-     -e MOCK_MODE=false \
+     -p 443:8443 \
+     --env-file .env \
+     -v ~/.creds/secops-sa.json:/app/credentials.json:ro \
      secops-ingestion:latest
    ```
+   Open `https://localhost` in your browser.
 
 ---
 
-### Method 3: Docker Compose
+### Method 3: Docker Compose (`env_file: .env`)
 
-Create a `docker-compose.yml` file:
+Create a `docker-compose.yml` file in the project root:
 
 ```yaml
-version: '3.8'
-
 services:
   secops-ingestion:
     build: .
     container_name: secops-ingestion-monitor
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "443:8443"
+    env_file:
+      - .env
     environment:
-      - SECOPS_PROJECT_ID=your-secops-project-id
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
-      - MOCK_MODE=false
-      - PORT=8080
+      - PORT=8443
     volumes:
-      - ./credentials.json:/app/credentials.json:ro
+      - ~/.creds/secops-sa.json:/app/credentials.json:ro
 ```
 
-Run:
+Start the stack:
 ```bash
 docker compose up -d
 ```
 
 ---
 
-### Method 4: CLI Reporting & Exports
+### Method 4: CLI Reporting & File Exports
 
-You can generate reports directly in your terminal or export them to CSV, JSON, or Markdown:
+`secops_ingestion_cli.py` automatically loads `.env` as well, or accepts flags directly on the command line:
 
 ```bash
-# Display daily summary with 30m reconciliation
-./secops_ingestion_cli.py --project your-secops-project-id --timeframe daily --reconcile-30m
+# Pull Daily metrics using settings from .env and run 30m rollup reconciliation
+./secops_ingestion_cli.py --timeframe daily --reconcile-30m
 
-# Display weekly summary
-./secops_ingestion_cli.py --project your-secops-project-id --timeframe weekly
+# Pull Weekly, Monthly, or 12-Month (Yearly) metrics
+./secops_ingestion_cli.py --timeframe weekly
+./secops_ingestion_cli.py --timeframe monthly
+./secops_ingestion_cli.py --timeframe yearly
 
-# Display full 12-month summary
-./secops_ingestion_cli.py --project your-secops-project-id --timeframe yearly
-
-# Export report to files
+# Export summary reports to CSV, JSON, and Markdown
 ./secops_ingestion_cli.py \
-  --project your-secops-project-id \
   --timeframe daily \
-  --export-csv report.csv \
-  --export-json report.json \
-  --export-md report.md
+  --export-csv daily_report.csv \
+  --export-json daily_report.json \
+  --export-md daily_report.md
 
-# Run offline in mock mode
+# Run completely offline with synthetic demo data
 ./secops_ingestion_cli.py --mock --timeframe daily --reconcile-30m
 ```
 
 ---
 
-## ⏱️ Automated Telemetry Collection & Scheduling
+## 🩺 BindPlane Pipeline Health & Delivery Reconciliation
 
-The web application provides a dedicated collection endpoint:
-
-```http
-POST /api/collect
-```
-
-When invoked, the server queries Cloud Monitoring for all 4 periods (`daily`, `weekly`, `monthly`, `yearly`), calculates reconciliations, and updates its in-memory cache.
-
-### Automated Hourly Cron Setup
-
-To schedule automated hourly metrics collection on a Linux host or VM:
-
-```bash
-# Open crontab editor
-crontab -e
-
-# Add an hourly job:
-0 * * * * curl -s -X POST http://localhost:8080/api/collect > /dev/null 2>&1
-```
-
-### Google Cloud Scheduler Setup (Optional)
-
-If running behind a Google Cloud Load Balancer or public domain:
-
-```bash
-gcloud scheduler jobs create http secops-hourly-collector \
-  --location="us-central1" \
-  --schedule="0 * * * *" \
-  --time-zone="UTC" \
-  --uri="https://your-domain.com/api/collect" \
-  --http-method="POST"
-```
-
----
-
-## 🩺 BindPlane Pipeline Health
-
-The **Pipeline Health** panel (top of the dashboard) combines BindPlane Cloud collector state with SecOps ingestion telemetry and lists active issues by severity. Issues are computed on demand (60s cache) and held in memory only; nothing is written to Cloud Monitoring.
-
-### Enable
-
-```bash
-chmod 600 ~/.creds/bindplane-api.txt
-export BINDPLANE_ACCOUNT_ID="<bindplane-project-id>"
-export BINDPLANE_API_KEY_FILE="~/.creds/bindplane-api.txt"
-```
-
-BindPlane Cloud requires **both** `X-Bindplane-Api-Key` and `X-Bindplane-Account-ID`; an API key cannot discover its own account. If BindPlane is not configured the panel says so and still shows SecOps-side issues.
+When `BINDPLANE_ACCOUNT_ID` and `BINDPLANE_API_KEY` (or `BINDPLANE_API_KEY_FILE`) are set in `.env` (or when `MOCK_MODE="true"`), the dashboard evaluates collector and delivery health every 60 seconds:
 
 ### Detection Rules
 
-| Category | Severity | Trigger |
+| Category | Severity | Trigger Condition |
 | :--- | :---: | :--- |
-| `AGENT_DISCONNECTED` | critical | Collector not connected to BindPlane. |
-| `AGENT_SILENT` | critical | Connected, but zero bytes to the SecOps destination in the window (or no throughput reported). |
-| `SOURCE_SILENT` | warning | One source on a collector is at zero while its other sources are flowing. |
-| `PIPELINE_DROP` | warning / critical | Destination out is ≥20% / ≥50% below source in. Processors that filter on purpose can trigger this; tune the thresholds. |
-| `AGENT_CONFIG_FAILED` | critical | OpAMP `remoteConfigStatus = FAILED`. |
-| `CONFIG_ROLLOUT_ERROR` | critical | Configuration rollout reports agent errors. |
-| `AGENT_UNHEALTHY` / `AGENT_STATUS_ABNORMAL` | warning | Non-zero `healthStatus` or non-standard agent `status`. |
-| `AGENTS_OUT_OF_DATE` | info | Aggregate count of collectors with an upgrade available. |
-| `SECOPS_LOG_TYPE_SILENT` | critical | A log type stops arriving for longer than `max(90 min, 3 × its median arrival gap)`. Batch/context feeds are judged against their own cadence. |
-| `SECOPS_PARSER_FAILURE` | critical | Records arriving, zero UDM events produced. |
-| `SECOPS_NORMALIZATION_LOW` | warning | Normalization ratio below 75% (heuristic: one record can yield 0..N events). |
-| `BINDPLANE_API_UNAVAILABLE` / `SECOPS_TELEMETRY_UNAVAILABLE` | critical | An upstream API failed. The other system's issues are still reported. |
-| `SOURCE_NO_DATA_24H` | warning | A configured source reported no throughput at all in 24h (e.g. a syslog listener nobody sends to). |
-| `DELIVERY_STOPPED` | critical | BindPlane sent a log type in the last hour; SecOps received none. |
-| `DELIVERY_GAP` | warning / critical | The recent SecOps/BindPlane ratio fell ≥50% / ≥80% below that log type's 24h ratio. |
-| `DELIVERY_GAP_24H` | warning | A log type's 24h ratio is far below the fleet median, which usually means a burst was dropped. Names the collector that sent most of it. |
-| `LOG_TYPE_NOT_IN_SECOPS` | warning | BindPlane sent a log type all day that SecOps never recorded (typo, unsupported log type, or rejected). |
+| `AGENT_DISCONNECTED` | `critical` | Collector is disconnected from BindPlane. |
+| `AGENT_SILENT` | `critical` | Collector is connected, but sent `0 B/s` to the SecOps destination in the window. |
+| `SOURCE_SILENT` | `warning` | One source on an active collector is at `0 B/s` while other sources on the same collector are flowing. |
+| `SOURCE_NO_DATA_24H` | `warning` | A configured source reported no throughput rows at all over 24 hours. |
+| `PIPELINE_DROP` | `warning` / `critical` | Collector destination output is ≥20% (`warning`) or ≥50% (`critical`) below source input. |
+| `AGENT_CONFIG_FAILED` | `critical` | OpAMP `remoteConfigStatus = FAILED` on the collector. |
+| `CONFIG_ROLLOUT_ERROR` | `critical` | BindPlane configuration rollout reports agent errors. |
+| `AGENT_UNHEALTHY` / `AGENT_STATUS_ABNORMAL` | `warning` | Non-zero `healthStatus` or abnormal agent `status`. |
+| `AGENTS_OUT_OF_DATE` | `info` | Aggregate count of collectors with an agent upgrade available. |
+| `SECOPS_LOG_TYPE_SILENT` | `critical` | A SecOps log type stops arriving for longer than `max(90 min, 3 × median arrival gap)`. |
+| `SECOPS_PARSER_FAILURE` | `critical` | Raw records are arriving in SecOps, but `0` normalized UDM events are produced. |
+| `SECOPS_NORMALIZATION_LOW` | `warning` | UDM normalization rate is below 75%. |
+| `DELIVERY_STOPPED` | `critical` | BindPlane sent ≥1 MB of a log type in the last hour, but SecOps received `0` bytes. |
+| `DELIVERY_GAP` | `warning` / `critical` | Recent 1h SecOps/BindPlane byte ratio dropped ≥50% (`warning`) or ≥80% (`critical`) below its 24h baseline. |
+| `DELIVERY_GAP_24H` | `warning` | A log type's 24h SecOps/BindPlane ratio is ≥75% below the fleet-wide median ratio (identifies the top sending collector). |
+| `LOG_TYPE_NOT_IN_SECOPS` | `warning` | BindPlane sent ≥1 MB of a log type over 24h that SecOps never recorded. |
+| `BINDPLANE_API_UNAVAILABLE` / `SECOPS_TELEMETRY_UNAVAILABLE` | `critical` | One upstream API failed; the remaining upstream continues to be evaluated independently. |
 
-### Limitations
+---
 
-- BindPlane exposes throughput as **bytes/sec only** (no record counts), averaged over the window.
-- State (first-seen, recently resolved) is per-process and resets on restart.
+## ⏱️ Automated Telemetry Collection & Cron Scheduling
 
-### Delivery Reconciliation (BindPlane sent vs SecOps received)
+The `POST /api/collect` endpoint triggers a full refresh across all 4 timeframes (`daily`, `weekly`, `monthly`, `yearly`). It requires the `CRON_SECRET` token configured in your `.env` file.
 
-The **Delivery** tab compares, per SecOps log type, what BindPlane sent against what SecOps received:
+### Example `curl` Request Using `CRON_SECRET` from `.env`
+```bash
+source .env
+curl -k -X POST https://localhost:8443/api/collect \
+  -H "X-Cron-Token: ${CRON_SECRET}"
+```
 
-1. **Mapping**: each BindPlane source's `google_secops_standardization` processor declares its SecOps `logType`. Throughput node IDs (`source/<name>_<source-id>`) attribute bytes to those log types. A source that emits several log types conditionally is treated as one group and compared against the sum of those types in SecOps.
-2. **Collector identity**: SecOps tags all BindPlane traffic with one fixed `collector_id`, so individual collectors cannot be told apart on the SecOps side. Log type is the only shared key; per-collector attribution comes from BindPlane.
-3. **Ratios, not equality**: BindPlane measures OTLP payload (uncompressed, with attributes) while SecOps counts raw bytes, so the ratio is typically about 0.3–0.5, not 1.0. Each group is judged against its own 24h ratio and against the fleet-median ratio.
-4. **Lag**: the SecOps "recent" window ends 30 minutes before the latest data, because the newest bucket is usually still filling.
+### Hourly Linux Crontab Example
+```bash
+crontab -e
+```
+Add:
+```cron
+0 * * * * . /path/to/google-secops-ingestion-tracking/.env && curl -ksS -X POST https://127.0.0.1:8443/api/collect -H "X-Cron-Token: ${CRON_SECRET}" > /dev/null
+```
 
 ---
 
 ## 🌐 REST API Reference
 
-| Endpoint | Method | Query Parameters | Description |
-| :--- | :---: | :--- | :--- |
-| `/api/status` | `GET` | *None* | Connection mode (`live`/`mock`), project ID (redacted), and auth diagnostics. |
-| `/api/ingestion/summary` | `GET` | `period` (`daily`, `weekly`, `monthly`, `yearly`) | High-level KPI totals (Bytes, Records, Normalized UDM, Error counts). |
-| `/api/ingestion/breakdown` | `GET` | `period` | Detailed metrics broken down by `log_type` and `collector_id`. |
-| `/api/ingestion/timeseries` | `GET` | `period` | Formatted timestamp points for Chart.js volume and records trend lines. |
-| `/api/ingestion/reconcile` | `GET` | `period` | Side-by-side comparison of `sum(30m buckets)` vs `rollup` with official max. |
-| `/api/ingestion/bigquery-compat` | `GET` | `period` | Telemetry formatted in legacy `datalake.ingestion_metrics` schema. |
-| `/api/collect` | `POST` | *None* | Triggers a fresh telemetry extraction across all timeframes. |
-| `/api/export/csv` | `GET` | `period` | Downloads the ingestion summary as a CSV file. |
-| `/api/export/json` | `GET` | `period` | Downloads the ingestion summary as structured JSON. |
-| `/api/refresh` | `POST` | *None* | Invalidates metric cache for on-demand UI refreshes. |
-| `/api/pipeline/health` | `GET` | `window` (`5m`, `1h`, `24h`) | BindPlane + SecOps pipeline issues, collector table, delivery reconciliation, and Unified View rows. |
+| Endpoint | Method | Auth Header Required | Description |
+| :--- | :---: | :---: | :--- |
+| `/api/status` | `GET` | *None* | Connection status (`live`/`mock`), redacted project ID, and SSL status. |
+| `/api/ingestion/summary` | `GET` | *None* | KPI totals for `period` (`daily`, `weekly`, `monthly`, `yearly`). |
+| `/api/ingestion/breakdown` | `GET` | *None* | Per-`log_type` and `collector_id` breakdown for `period`. |
+| `/api/ingestion/timeseries` | `GET` | *None* | Time-series data points for Chart.js trend lines. |
+| `/api/ingestion/reconcile` | `GET` | *None* | 30-minute bucket sum vs. full-window rollup reconciliation. |
+| `/api/ingestion/bigquery-compat` | `GET` | *None* | Legacy `datalake.ingestion_metrics` compatible rows. |
+| `/api/pipeline/health` | `GET` | *None* | BindPlane + SecOps issues, collector fleet, delivery ratios, and Unified View (`window=5m\|1h\|24h`). |
+| `/api/export/csv` | `GET` | *None* | Downloads CSV report (hardened against CWE-1236 formula injection). |
+| `/api/export/json` | `GET` | *None* | Downloads JSON report with redacted project ID. |
+| `/api/refresh` | `POST` | `X-Auth-Token: <ADMIN_SECRET>` or `Authorization: Bearer <ADMIN_SECRET>` | Clears cached telemetry to force an immediate reload. |
+| `/api/settings` | `POST` | `X-Auth-Token: <ADMIN_SECRET>` or `Authorization: Bearer <ADMIN_SECRET>` | Updates runtime `project_id` or `mock_mode`. |
+| `/api/collect` | `POST` | `X-Cron-Token: <CRON_SECRET>` or `Authorization: Bearer <CRON_SECRET>` | Refreshes and caches all 4 periods (`daily`, `weekly`, `monthly`, `yearly`). |
 
 ---
 
 ## 🧪 Testing & Quality Assurance
 
-A comprehensive unit test suite is included in the `tests/` directory:
+Run the full unit test suite (120+ tests):
 
 ```bash
 python3 -m unittest discover tests
-# or
-pip install -r requirements-dev.txt && python3 -m pytest -q
+# or with pytest:
+pip install -r requirements-dev.txt
+PYTHONPATH=. pytest -v
 ```
-
-### What the Tests Cover:
-1. **Mathematical Accuracy**: Validates bytes-to-MB/GB conversions and normalization ratio calculations.
-2. **Reconciliation Rules**: Asserts that `max(sum_30m, rollup)` is strictly honored under edge cases.
-3. **BigQuery Schema Compatibility**: Verifies that delimiter `:RQ:` and field mappings match legacy BigQuery table schemas.
-4. **Mock Mode Fallback**: Guarantees that the app runs completely offline without network or GCP dependencies.
-5. **REST API Endpoints**: Tests HTTP response status codes, JSON structures, and input validation.
-6. **BindPlane, Delivery & Unified View**: Tests collector health rules, cadence-aware silence detection, BindPlane-to-SecOps delivery reconciliation, and the side-by-side Unified View join engine.
 
 ---
 
-## 🔒 Security & Redaction
+## 🔒 Security & Redaction Controls
 
-- **Least Privilege**: The application requires only `roles/monitoring.viewer`. It cannot modify infrastructure, view raw logs, or access proprietary security detections.
-- **Tenant Redaction**: When displaying API queries in the web editor, tenant-specific project identifiers are sanitized to prevent accidental data leakage during demos or screenshots.
-- **No Secret Hardcoding**: Credential paths and project IDs are injected exclusively via environment variables.
+- **`.env`-First Secret Management**: All API keys, paths, and tokens are read from `.env` (or environment variables) and never hardcoded in source files.
+- **Deny-by-Default Mutating Routes**: `/api/settings`, `/api/refresh`, and `/api/collect` refuse requests (`HTTP 503`) if `ADMIN_SECRET` / `CRON_SECRET` are not set in `.env`.
+- **Automatic Tenant Redaction**: Project IDs are masked (`yo******` / `[REDACTED_PROJECT_ID]`) in public API responses and BigQuery compatibility views, and credential previews or filesystem paths are never returned in diagnostic responses.
+- **Hardened HTTP Headers**: Enforces `Strict-Transport-Security`, `Content-Security-Policy` (`frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cache-Control: no-store`, and CSV formula-injection neutralization.
 
 ---
 
 ## 📝 Release Notes & Changelog
 
+### Version 2.4.1 (October 2026)
+- **Built-In `.env` Loader & `.env.example`**: Added automatic zero-dependency `.env` loading in `secops_ingestion/config.py` and a documented `.env.example` template with placeholders for all GCP, BindPlane, Admin, and Cron credentials.
+- **Public Repository Sanitization**: Removed all environment-specific hostnames and internal project references from test fixtures and docstrings.
+- **Cache-Control & Static Asset Versioning**: Added cache-busting query strings to static assets and `Cache-Control: no-store` on `/` for CDN compatibility.
+
 ### Version 2.4.0 (October 2026)
-- **Unified View (`BindPlane | Delivery | SecOps`)**: Default first tab joining BindPlane collector metrics, delivery ratios, and SecOps Cloud Monitoring metrics (1h, 24h, UDM %, 24h sparkline, path classification) into a single row per log type with expandable per-collector drill-down.
-- **Delivery Reconciliation**: BindPlane-to-SecOps comparison per log type (`DELIVERY_STOPPED`, `DELIVERY_GAP`, `DELIVERY_GAP_24H`, `LOG_TYPE_NOT_IN_SECOPS`) with attribution to the collector responsible, plus a Delivery tab.
-- **Idle Source Detection**: `SOURCE_NO_DATA_24H` for configured sources that produced nothing in 24h.
+- **Unified View (`BindPlane | Delivery | SecOps`)**: Default first tab joining BindPlane collector metrics, delivery ratios, and SecOps Cloud Monitoring metrics into a single row per log type with expandable per-collector drill-downs.
+- **Delivery Reconciliation**: BindPlane-to-SecOps comparison per log type (`DELIVERY_STOPPED`, `DELIVERY_GAP`, `DELIVERY_GAP_24H`, `LOG_TYPE_NOT_IN_SECOPS`).
+- **Idle Source Detection**: `SOURCE_NO_DATA_24H` for configured sources with zero 24h measurements.
 
 ### Version 2.3.0 (October 2026)
-- **BindPlane Pipeline Health**: New panel and `/api/pipeline/health` endpoint surfacing collector outages, silent collectors/sources, in-to-out drops, config/rollout failures, silent SecOps log types, and parser failures.
-- **Cadence-Aware Silence Detection**: SecOps log-type silence is judged against each feed's own arrival interval, avoiding false alarms on batch context feeds.
-- **Upstream Isolation**: A BindPlane or Cloud Monitoring outage is reported as an issue instead of failing the panel.
-- **Dev Tooling**: Added `requirements-dev.txt`; `HOST` env var for loopback-only local runs.
+- **BindPlane Pipeline Health**: Added `/api/pipeline/health` endpoint and UI panel for collector outages, silent collectors/sources, pipeline drops, rollout failures, cadence-aware SecOps silence detection, and parser failures.
 
 ### Version 2.2.0 (September 2026)
-- **High-Contrast Canvas Accessibility**:
-  - Bound explicit `fontColor: '#f8fafc'` (slate-50) to all Chart.js legend items generated by `renderDonutChart()`. Resolves HTML5 Canvas 2D default black (`#000000`) text rendering against obsidian dark backgrounds when `fontColor` was omitted.
-  - Set global high-contrast defaults (`Chart.defaults.color = '#f1f5f9'`) to prevent any unstyled chart labels or ticks from falling back to dark tones.
-  - Enhanced doughnut chart hover tooltips to show formatted volume (`GB`/`MB`) and share percentage (`%`).
-- **Telemetry Schema Alignment**:
-  - Fixed `renderVolumeChart()` to parse `/api/ingestion/timeseries` timeline objects directly, restoring the spline line chart across all timeframes.
-  - Updated `loadAllData()` to extract `breakData.log_types`, mapping normalized event counts, collector lists, and health statuses into the Log Sources Explorer and Top Log Sources doughnut chart.
-  - Resolved 30-minute Rollup Reconciliation bindings (`sum_30m`, `rollup`, `official_max`, `winner`) and added empty-state feedback.
-- **Port 443 & Native SSL**:
-  - Added support for running directly on standard HTTPS port 443 with TLS certificates mounted at `/app/certs`.
+- **High-Contrast Canvas Accessibility & Native SSL**: Explicit light-slate legend colors on dark backgrounds and native port 443/8443 HTTPS support.
 
 ### Version 2.1.0 (September 2026)
-- **Cyber Bento Redesign**: Complete UI modernization using an asymmetric Bento Grid design system, glassmorphic obsidian cards, ambient aurora mesh styling, Tailwind CSS, and Alpine.js.
-- **Self-Hosted Static Engine**: Replaced third-party CDN dependencies with local, self-hosted vendor bundles (`tailwind.min.js`, `alpine.min.js`, `chart.min.js`) for air-gapped and enterprise reliability.
-- **Automated Telemetry Collection**: Added `/api/collect` endpoint for triggering scheduled background syncs via Google Cloud Scheduler or crontab.
-- **Tenant Identifier Redaction**: Automatically redacts internal GCP project IDs from query inspectors and diagnostic endpoints.
+- **Cyber Bento Redesign**: Glassmorphic dark UI with local self-hosted Tailwind CSS, Alpine.js, and Chart.js bundles.
 
 ---
 

@@ -1,12 +1,71 @@
 """
 SecOps Ingestion Metrics Configuration
-Project defaults, metric definitions, and time intervals.
+Project defaults, metric definitions, .env loader, and time intervals.
 """
+import os
 from dataclasses import dataclass, field
-from typing import List, Dict
+from pathlib import Path
+from typing import List, Dict, Optional
+
+
+def load_dotenv_file(dotenv_path: Optional[str] = None, override: bool = False) -> Dict[str, str]:
+    """
+    Load environment variables from a .env file into os.environ.
+
+    Supports standard KEY=VALUE lines, comments (#), optional 'export ' prefix,
+    and single/double quoted values without requiring external dependencies.
+    Existing environment variables take precedence unless override=True.
+    """
+    candidates = []
+    if dotenv_path:
+        candidates.append(Path(dotenv_path).expanduser())
+    elif os.environ.get("DOTENV_PATH"):
+        candidates.append(Path(os.environ["DOTENV_PATH"]).expanduser())
+    else:
+        # Check current working directory and repository root
+        candidates.append(Path.cwd() / ".env")
+        candidates.append(Path(__file__).resolve().parent.parent / ".env")
+
+    loaded: Dict[str, str] = {}
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("export "):
+                        line = line[len("export "):].strip()
+                    if "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    key = key.strip()
+                    val = val.strip()
+                    if not key:
+                        continue
+                    # Strip matching surrounding quotes or inline unquoted comments
+                    if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+                        val = val[1:-1]
+                    elif " #" in val:
+                        val = val.split(" #", 1)[0].strip()
+
+                    loaded[key] = val
+                    if override or key not in os.environ:
+                        os.environ[key] = val
+        except OSError:
+            pass
+        break
+    return loaded
+
+
+# Automatically load .env on package import so both `python3 app.py`, Gunicorn,
+# and `./secops_ingestion_cli.py` pick up .env configuration out of the box.
+load_dotenv_file()
 
 # GCP Project and Instance Defaults
-DEFAULT_PROJECT_ID = "your-secops-project-id"
+DEFAULT_PROJECT_ID = os.environ.get("SECOPS_PROJECT_ID", "your-secops-project-id")
 DEFAULT_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
 DEFAULT_REGION = "us"
 
@@ -45,9 +104,9 @@ ROLLUP_30M_SECONDS = 1800
 # RFC 3339 / ISO 8601 formatting for Cloud Monitoring API
 MONITORING_STRFTIME = "%Y-%m-%dT%H:%M:%SZ"
 
-# Realistic known log types for fallback / simulation matching customer environment
+# Realistic known log types for fallback / simulation matching enterprise environments
 DEFAULT_KNOWN_LOG_TYPES = [
-    {"log_type": "PAN_FIREWALL", "collectors": ["observiq-munich", "cribl-munich-9514"], "ratio": 0.991, "avg_bytes": 480},
+    {"log_type": "PAN_FIREWALL", "collectors": ["bindplane-edge-fw", "syslog-edge-9514"], "ratio": 0.991, "avg_bytes": 480},
     {"log_type": "WINEVTLOG", "collectors": ["cribl-edge-windows", "bindplane-hg-windows"], "ratio": 0.985, "avg_bytes": 620},
     {"log_type": "CISCO_MERAKI", "collectors": ["cribl-stream-meraki-10514"], "ratio": 0.962, "avg_bytes": 350},
     {"log_type": "WINDOWS_SYSMON", "collectors": ["bindplane-hg-sysmon", "cribl-edge-sysmon"], "ratio": 0.998, "avg_bytes": 740},
