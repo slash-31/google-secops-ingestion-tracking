@@ -7,6 +7,7 @@ import json
 from typing import List, Dict, Any, Optional
 
 from .calculator import AggregationSummary, format_bytes, format_number
+from .security import csv_safe
 
 
 class IngestionExporter:
@@ -83,8 +84,8 @@ class IngestionExporter:
             writer.writeheader()
             for src in summary.log_types:
                 writer.writerow({
-                    "log_type": src.log_type,
-                    "collector_ids": ":RQ:".join(src.collectors),
+                    "log_type": csv_safe(src.log_type),
+                    "collector_ids": csv_safe(":RQ:".join(src.collectors)),
                     "size_mb": src.size_mb,
                     "size_gb": src.size_gb,
                     "bytes_count": src.bytes_count,
@@ -93,8 +94,8 @@ class IngestionExporter:
                     "error_events": src.error_events,
                     "normalization_rate_pct": src.normalization_rate_pct,
                     "avg_bytes_per_record": src.avg_bytes_per_record,
-                    "health_status": src.health_status,
-                    "recommendation": src.recommendation,
+                    "health_status": csv_safe(src.health_status),
+                    "recommendation": csv_safe(src.recommendation),
                 })
 
     @staticmethod

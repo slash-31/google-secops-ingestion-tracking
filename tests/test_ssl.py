@@ -99,6 +99,7 @@ class TestSSLUtil(unittest.TestCase):
         )
         ctx = create_ssl_context(self.cert_path, self.key_path)
         self.assertIsInstance(ctx, ssl.SSLContext)
+        self.assertEqual(ctx.minimum_version, ssl.TLSVersion.TLSv1_2)
 
     def test_create_ssl_context_missing_files_raises(self):
         with self.assertRaises(FileNotFoundError):

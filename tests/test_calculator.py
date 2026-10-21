@@ -108,6 +108,37 @@ class TestIngestionCalculator(unittest.TestCase):
         self.assertTrue(len(summary.log_types) > 0)
         self.assertTrue(len(summary.timeline_series) > 0)
 
+    def test_exporter_csv_neutralizes_formula_injection(self):
+        import os
+        import tempfile
+        from secops_ingestion.calculator import AggregationSummary
+        from secops_ingestion.exporter import IngestionExporter
+
+        src = LogSourceMetrics(
+            log_type="=cmd|' /C calc'!A0",
+            collectors=["@evil-collector"],
+            bytes_count=1000,
+            record_count=10,
+            normalized_event_count=10,
+        )
+        src.calculate_derived_fields()
+        summary = AggregationSummary(
+            period_name="Daily",
+            start_time="2026-10-20T00:00:00Z",
+            end_time="2026-10-21T00:00:00Z",
+            log_types=[src],
+        )
+        with tempfile.NamedTemporaryFile("r", suffix=".csv", delete=False) as fh:
+            path = fh.name
+        try:
+            IngestionExporter.export_csv(summary, path)
+            with open(path, "r", encoding="utf-8") as fh:
+                content = fh.read()
+            self.assertIn("'=cmd|' /C calc'!A0", content)
+            self.assertIn("'@evil-collector", content)
+        finally:
+            os.unlink(path)
+
 
 if __name__ == "__main__":
     unittest.main()

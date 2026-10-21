@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade "pip>=26.2.1" \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy application source code and entrypoint
 COPY secops_ingestion/ ./secops_ingestion/

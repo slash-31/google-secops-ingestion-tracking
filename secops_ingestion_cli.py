@@ -185,12 +185,13 @@ def main():
             app.config["SSL_KEY_PATH"] = key_p
 
         target_port = args.port if args.port is not None else (443 if args.ssl else 5000)
+        bind_host = os.environ.get("HOST", "0.0.0.0")  # nosec B104
         print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://localhost:{target_port} (Project: {args.project})")
         if args.ssl:
             print(f"🔒 SSL/TLS Enabled (Cert: {cert_p}, Key: {key_p})")
         app.config["SECOPS_PROJECT_ID"] = args.project
         app.config["MOCK_MODE"] = args.mock
-        app.run(host="0.0.0.0", port=target_port, debug=False, ssl_context=ssl_context)
+        app.run(host=bind_host, port=target_port, debug=False, ssl_context=ssl_context)
         return
 
     client = SecOpsMonitoringClient(

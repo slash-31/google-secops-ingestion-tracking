@@ -434,14 +434,15 @@ class SecOpsMonitoringClient:
                     cur_start = cur_end - timedelta(seconds=alignment_period_seconds)
                     
                     # Diurnal curve (sinusoidal diurnal pattern matching working hours)
+                    # Note: random.uniform is used solely for synthetic chart jitter, not security.
                     hour_of_day = cur_start.hour
                     diurnal_factor = 0.5 + 0.5 * math.sin((hour_of_day - 6) * math.pi / 12)
-                    jitter = random.uniform(0.85, 1.15)
+                    jitter = random.uniform(0.85, 1.15)  # nosec B311
                     
                     period_factor = alignment_period_seconds / 60.0  # rate per minute
                     raw_records = int(base_rate * collector_scale * (0.4 + 0.6 * diurnal_factor) * jitter * period_factor)
-                    raw_bytes = int(raw_records * base_avg_bytes * random.uniform(0.95, 1.05))
-                    norm_events = int(raw_records * norm_ratio * random.uniform(0.98, 1.0))
+                    raw_bytes = int(raw_records * base_avg_bytes * random.uniform(0.95, 1.05))  # nosec B311
+                    norm_events = int(raw_records * norm_ratio * random.uniform(0.98, 1.0))  # nosec B311
 
                     if "bytes_count" in metric_type:
                         val = raw_bytes

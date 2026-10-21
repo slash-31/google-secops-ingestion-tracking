@@ -475,7 +475,7 @@ function renderHealthCards(sources) {
         Efficiency: <strong>${src.normalization_rate_pct}%</strong> (${formatNumber(src.normalized_event_count)} / ${formatNumber(src.record_count)} records)
       </div>
       <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
-        ${src.recommendation}
+        ${esc(src.recommendation)}
       </div>
     `;
     container.appendChild(card);

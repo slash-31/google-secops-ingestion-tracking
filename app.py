@@ -712,7 +712,8 @@ if __name__ == "__main__":
         app.config["SSL_KEY_PATH"] = k_path
         print(f"🔒 SSL/TLS Enabled (Cert: {c_path}, Key: {k_path})")
 
-    host = os.environ.get("HOST", "0.0.0.0")
+    # Intentional container/server bind default; override with HOST=127.0.0.1 for loopback-only.
+    host = os.environ.get("HOST", "0.0.0.0")  # nosec B104
     print(f"\n🚀 Launching SecOps Ingestion Dashboard on {protocol}://{host}:{port}")
     app.run(host=host, port=port, debug=False, ssl_context=ssl_context)
 

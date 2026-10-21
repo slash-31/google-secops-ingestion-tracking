@@ -91,8 +91,8 @@ def generate_self_signed_cert(
         sys_hostname = socket.gethostname()
         if sys_hostname:
             _add_name_or_ip(sys_hostname)
-    except Exception:
-        pass
+    except OSError as exc:
+        logger.debug("Could not resolve system hostname for SAN: %s", exc)
 
     if additional_alt_names:
         for alt in additional_alt_names:
@@ -211,6 +211,7 @@ def create_ssl_context(cert_path: str, key_path: str) -> ssl.SSLContext:
         raise FileNotFoundError(f"SSL private key file not found: {key_path}")
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
     return ctx
 
@@ -234,8 +235,8 @@ def get_certificate_info(cert_path: str) -> Dict[str, Any]:
         san_ext = cert.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
         for val in san_ext.value:
             san_list.append(str(val.value))
-    except Exception:
-        pass
+    except x509.ExtensionNotFound:
+        logger.debug("Certificate at %s has no SubjectAlternativeName extension", cert_path)
 
     now = datetime.now(timezone.utc)
     not_after = cert.not_valid_after_utc if hasattr(cert, "not_valid_after_utc") else cert.not_valid_after.replace(tzinfo=timezone.utc)
