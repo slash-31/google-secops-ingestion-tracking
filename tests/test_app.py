@@ -229,6 +229,10 @@ class TestAppEndpoints(unittest.TestCase):
         ]:
             self.assertIn(header, res.headers, f"missing {header}")
         self.assertIn("frame-ancestors 'none'", res.headers["Content-Security-Policy"])
+        self.assertEqual(res.headers.get("Cache-Control"), "no-store")
+        html = res.get_data(as_text=True)
+        self.assertIn("/static/js/app-bento.js?v=", html)
+        self.assertIn("/static/css/bento.css?v=", html)
 
     def test_export_filename_is_not_header_injectable(self):
         res = self.app.get('/api/export/csv?period=daily";filename="evil.html')

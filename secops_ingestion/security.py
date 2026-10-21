@@ -61,9 +61,10 @@ def apply_security_headers(response):
     """Flask after_request hook: attach defence-in-depth headers to every response."""
     for header, value in SECURITY_HEADERS.items():
         response.headers.setdefault(header, value)
-    # Never let a proxy or browser cache an authenticated/diagnostic API body.
-    if request.path.startswith("/api/"):
-        response.headers.setdefault("Cache-Control", "no-store")
+    # Never let a proxy (e.g. Cloudflare) or browser cache an authenticated/diagnostic
+    # API body or the root HTML shell (so asset cache-busting tags take effect immediately).
+    if request.path.startswith("/api/") or request.path == "/":
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
