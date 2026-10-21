@@ -151,11 +151,45 @@ class RateLimiter:
             return True
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes")
+
+
+def _trusted_proxy_hops() -> int:
+    """
+    Number of right-most X-Forwarded-For entries appended by trusted infrastructure.
+
+    1 = Cloud Run / single reverse proxy (client IP is the last entry).
+    2 = Google external Application Load Balancer (appends "<client>, <lb-ip>").
+    0 = ignore X-Forwarded-For entirely and use the socket peer address.
+    """
+    try:
+        return max(0, int(os.environ.get("TRUSTED_PROXY_HOPS", "1")))
+    except ValueError:
+        return 1
+
+
 def _client_key() -> str:
-    """Identify the caller for rate-limiting purposes, honouring the CDN header."""
-    forwarded = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """
+    Identify the caller for rate-limiting purposes.
+
+    Left-most X-Forwarded-For entries and CF-Connecting-IP are client-controlled,
+    so trusting them lets any caller rotate the header to bypass rate limits.
+    Only the hop appended by trusted infrastructure is used:
+      * CF-Connecting-IP is honoured only when TRUST_CLOUDFLARE=true (origin must
+        be locked to Cloudflare, otherwise the header is forgeable).
+      * Otherwise the entry TRUSTED_PROXY_HOPS positions from the right is used.
+    """
+    if _env_flag("TRUST_CLOUDFLARE"):
+        cf_ip = request.headers.get("CF-Connecting-IP", "").strip()
+        if cf_ip:
+            return cf_ip
+
+    hops = _trusted_proxy_hops()
+    if hops > 0:
+        chain = [h.strip() for h in request.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+        if len(chain) >= hops:
+            return chain[-hops]
     return request.remote_addr or "unknown"
 
 

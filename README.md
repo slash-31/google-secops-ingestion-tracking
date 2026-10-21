@@ -310,6 +310,8 @@ SSL_KEY_PATH="certs/key.pem"
 | `SSL_ENABLED` | `boolean` | `false` | Enables direct HTTPS termination using `SSL_CERT_PATH` and `SSL_KEY_PATH`. |
 | `SSL_CERT_PATH` | `string` | `certs/cert.pem` | Path to PEM-encoded TLS certificate. |
 | `SSL_KEY_PATH` | `string` | `certs/key.pem` | Path to PEM-encoded TLS private key. |
+| `TRUSTED_PROXY_HOPS` | `integer` | `1` | Right-most `X-Forwarded-For` entries added by your proxies, used to identify clients for rate limiting. `1` = Cloud Run / single proxy, `2` = Google external ALB, `0` = no proxy. |
+| `TRUST_CLOUDFLARE` | `boolean` | `false` | Honor `CF-Connecting-IP`. Enable only when the origin accepts traffic exclusively from Cloudflare. |
 | `PIPELINE_DROP_WARN_PCT` / `PIPELINE_DROP_CRIT_PCT` | `float` | `20` / `50` | Collector source-to-destination drop % for warning / critical alerts. |
 | `PIPELINE_DROP_MIN_INPUT_BPS` | `float` | `100` | Minimum collector input bytes/sec before evaluating drop %. |
 | `PIPELINE_SILENT_BPS` | `float` | `0` | Throughput (B/s) at or below which a collector/source is flagged silent. |
@@ -535,6 +537,11 @@ PYTHONPATH=. pytest -v
 ---
 
 ## 📝 Release Notes & Changelog
+
+### Version 2.4.2 (October 2026)
+- **Dependency CVE Remediation**: `cryptography 50.0.0`, `flask 3.1.3`, `requests 2.33.0`, `certifi 2026.10.19`, `pytest 9.0.3`; `pip >= 26.2.1` in the image.
+- **Spoof-Resistant Rate Limiting**: Client identity now uses the proxy-appended `X-Forwarded-For` hop (`TRUSTED_PROXY_HOPS`); `CF-Connecting-IP` is honored only with `TRUST_CLOUDFLARE=true`.
+- **Hardening**: TLS 1.2 minimum for built-in HTTPS; CSV formula-injection protection in CLI exports.
 
 ### Version 2.4.1 (October 2026)
 - **Built-In `.env` Loader & `.env.example`**: Added automatic zero-dependency `.env` loading in `secops_ingestion/config.py` and a documented `.env.example` template with placeholders for all GCP, BindPlane, Admin, and Cron credentials.
